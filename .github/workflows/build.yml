@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ---------------------------------------------------------------- the plugin
   build-windows:
     runs-on: windows-latest
     steps:
@@ -23,3 +24,46 @@ jobs:
           name: HelloPlugin-VST3-Windows
           path: build/HelloPlugin_artefacts/Release/VST3/
           if-no-files-found: error
+
+  # ------------------------------------------- automated tests (separate job)
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build_tests -DSAMPLER_BUILD_TESTS=ON
+
+      - name: Build tests
+        run: cmake --build build_tests --config Release --target SamplerTests --parallel
+
+      - name: Run tests
+        shell: bash
+        run: ./build_tests/SamplerTests_artefacts/Release/SamplerTests.exe
+
+  # ------------------------------------------------- benchmarks (separate job)
+  benchmarks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build_bench -DSAMPLER_BUILD_BENCHMARKS=ON
+
+      - name: Build benchmarks
+        run: cmake --build build_bench --config Release --target SamplerBenchmarks --parallel
+
+      - name: Run benchmarks
+        shell: bash
+        run: |
+          ./build_bench/SamplerBenchmarks_artefacts/Release/SamplerBenchmarks.exe | tee benchmark-output.txt
+          cat benchmark-results.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark-results.md
+            benchmark-output.txt
