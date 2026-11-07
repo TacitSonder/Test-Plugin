@@ -43,6 +43,7 @@ public:
         juce::String path;
         int start = -1;     // -1 = whole file
         int end = -1;
+        float delayMs = 0.0f;
     };
 
     explicit SampleLibrary (perf::Monitor&);
@@ -55,6 +56,7 @@ public:
     void clear();
     void removeSample (int slot);                                   // remove one file, later files move up
     void setRegion (int slot, int start, int end);                  // which part of the file plays
+    void setDelay (int slot, float ms, bool commit);                // start delay; commit=false while dragging (no listener call)
     void setSelected (int slot);
     int  getSelected() const noexcept;                              // clamped for display
     int  getNumLoaded() const noexcept   { return numLoaded; }
@@ -79,6 +81,7 @@ private:
     {
         juce::File file;
         int regionStart = -1, regionEnd = -1;     // restored selection (-1 = whole file)
+        float delayMs = 0.0f;
         std::shared_ptr<SampleData> result;
         juce::String error;
         std::atomic<bool> cancelled { false };

@@ -223,6 +223,19 @@ int main()
         }
     }
 
+    if (loadOne (lib, file48))                       // timeline: cost depends on the visible frames, not the file
+    {
+        const auto sample = lib.getSample (0);
+        juce::Path path; std::vector<float> a, b;
+        const juce::Rectangle<float> area (0.0f, 0.0f, 1200.0f, 200.0f);
+        for (int scale : { 100, 1000, 5000 })
+        {
+            auto t = measure (9, 200, [] {}, [&] { waveform::buildTimelineOutline (*sample, 0, sample->numFrames, (double) scale, area, path, a, b); });
+            addAbsRow ("ui: timeline outline, scale " + juce::String (scale) + " ms, 1200 px (30 s file)", t, 3000.0,
+                       scale == 5000 ? "runs on every SCALE slider step" : "");
+        }
+    }
+
     // ------------------------------------------------------ profiler overhead
     {
         const int N = 20000;

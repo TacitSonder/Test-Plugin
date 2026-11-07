@@ -11,6 +11,11 @@ dropdown, optionally select part of it, and any MIDI note (or the Play button) p
 * **Select a part of the file:** drag on the waveform. Drag either edge to adjust it,
   double-click to go back to the whole file. Only the selected part plays; the cut points get a
   ~1.3 ms fade so they never click. Each file remembers its own selection.
+* **Timeline (lower panel):** shows the selected part on a time axis in ms (0 = the moment you
+  trigger). **SCALE** sets how much time the panel spans, 100 to 5000 ms. The **handle** under the
+  waveform delays the sound: drag it (or click the track) and the waveform slides along the ruler;
+  double-click it to reset to 0. The delay is real: the file starts that many ms after the note.
+  Each file keeps its own delay (saved with the project), ready for several players layered together.
 * **Play** sends the same trigger as MIDI note 60 (middle C, velocity 100) so you can audition
   without drawing a note. It needs the host to be processing audio (in REAPER: arm/monitor the
   track, or enable "Run FX when stopped").

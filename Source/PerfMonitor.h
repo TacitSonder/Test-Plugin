@@ -44,6 +44,8 @@ namespace perf
         WaveformPath,       // rebuild the waveform outline
         WaveformPaint,      // waveform paint()
         SelectionPaint,     // selection overlay paint() (runs on every drag step)
+        TimelinePath,       // rebuild the timeline waveform (scale / region / size change)
+        TimelinePaint,      // timeline paint() (runs on every delay-drag step)
         Count
     };
 
@@ -66,6 +68,8 @@ namespace perf
         { "wavePath",     Thread::Message },
         { "wavePaint",    Thread::Message },
         { "selPaint",     Thread::Message },
+        { "tlPath",       Thread::Message },
+        { "tlPaint",      Thread::Message },
     };
     static_assert (std::size (kInfo) == (size_t) Id::Count, "perf::kInfo must match perf::Id");
 

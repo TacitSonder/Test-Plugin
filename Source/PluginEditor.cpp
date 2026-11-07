@@ -14,6 +14,11 @@ SamplerLookAndFeel::SamplerLookAndFeel()
     setColour (juce::PopupMenu::textColourId, theme::text);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent.withAlpha (0.35f));
     setColour (juce::PopupMenu::highlightedTextColourId, theme::text);
+    setColour (juce::Slider::backgroundColourId, theme::panel);
+    setColour (juce::Slider::trackColourId, theme::accent.withAlpha (0.55f));
+    setColour (juce::Slider::thumbColourId, theme::accent);
+    setColour (juce::Slider::textBoxTextColourId, theme::text);
+    setColour (juce::Slider::textBoxOutlineColourId, theme::outline);
     setColour (juce::TextButton::buttonColourId, theme::panel);
     setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.45f));
     setColour (juce::TextButton::textColourOffId, theme::text);
@@ -28,6 +33,7 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
       perfMon (p.getPerf()),
       waveform (p.getPerf()),
       selection (p.getPerf(), waveform),
+      timeline (p.getPerf()),
       overlay (p.getPerf(), p.getLibrary())
 {
     setLookAndFeel (&lookAndFeel);
@@ -52,6 +58,25 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     selection.onCommit = [this] (int start, int end) { library.setRegion (library.getSelected(), start, end); };
     addAndMakeVisible (selection);                       // above the waveform, below the perf overlay
 
+    timeline.onDelayChanged = [this] (float ms, bool committed) { library.setDelay (library.getSelected(), ms, committed); };
+    addAndMakeVisible (timeline);
+
+    scaleSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    scaleSlider.setRange (100.0, 5000.0, 1.0);
+    scaleSlider.setSkewFactorFromMidPoint (700.0);       // short and long files both get fine control
+    scaleSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 78, 22);
+    scaleSlider.setTextValueSuffix (" ms");
+    scaleSlider.setDoubleClickReturnValue (true, 1000.0);
+    scaleSlider.onValueChange = [this]
+    {
+        const int ms = (int) scaleSlider.getValue();
+        timeline.setScaleMs (ms);
+        processor.setScaleMs (ms);
+    };
+    scaleSlider.setValue ((double) processor.getScaleMs(), juce::dontSendNotification);
+    timeline.setScaleMs (processor.getScaleMs());
+    addAndMakeVisible (scaleSlider);
+
 #if SAMPLER_PERF_ENABLED
     perfButton.setComponentID ("perfButton");
     perfButton.setClickingTogglesState (true);
@@ -69,7 +94,7 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     const int savedWidth = processor.getEditorWidth(), savedHeight = processor.getEditorHeight();
 
     setResizable (true, true);
-    setResizeLimits (480, 400, 2400, 1400);
+    setResizeLimits (480, 480, 2400, 1600);
     setSize (savedWidth, savedHeight);
 
     library.addListener (this);
@@ -112,6 +137,15 @@ void SamplerEditor::resized()
     r.removeFromTop (gap);
     statusArea = r.removeFromBottom (statusH);
     r.removeFromBottom (gap / 2);
+    contentArea = r;
+
+    // bottom: SCALE row, above it the timeline; the rest is the waveform editor
+    auto scaleRow = r.removeFromBottom (juce::jlimit (22, 30, h / 20));
+    scaleLabelArea = scaleRow.removeFromLeft (juce::jlimit (46, 64, w / 12));
+    scaleSlider.setBounds (scaleRow.removeFromLeft (juce::jmin (scaleRow.getWidth(), 420)));
+    r.removeFromBottom (gap / 2);
+    timeline.setBounds (r.removeFromBottom ((int) ((float) r.getHeight() * 0.56f)));
+    r.removeFromBottom (gap);
     waveform.setBounds (r);
     selection.setBounds (r);
 
@@ -123,7 +157,7 @@ void SamplerEditor::layoutOverlay()
     if (! overlay.isVisible())
         return;
 
-    const auto wb = waveform.getBounds();
+    const auto wb = contentArea;
     const int ow = juce::jmin (wb.getWidth() - 16, PerfOverlay::kPreferredWidth);
     const int oh = juce::jmin (wb.getHeight() - 16, overlay.getPreferredHeight());
     overlay.setBounds (wb.getRight() - ow - 8, wb.getY() + 8, juce::jmax (0, ow), juce::jmax (0, oh));
@@ -132,6 +166,10 @@ void SamplerEditor::layoutOverlay()
 void SamplerEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
+
+    g.setColour (theme::subtle);
+    g.setFont (juce::FontOptions (13.0f));
+    g.drawText ("SCALE", scaleLabelArea, juce::Justification::centredLeft, false);
 
     g.setFont (juce::FontOptions (juce::jlimit (12.0f, 15.0f, (float) statusArea.getHeight() * 0.62f)));
 
@@ -197,6 +235,7 @@ void SamplerEditor::refreshFromLibrary()
     clearButton.setEnabled (n > 0 || library.getNumPending() > 0);
     waveform.setSample (library.getSample (sel));
     selection.setSample (library.getSample (sel));
+    timeline.setSample (library.getSample (sel));
 
     statusText = juce::String (n) + " / " + juce::String (SampleLibrary::kMaxSamples) + " files loaded";
 

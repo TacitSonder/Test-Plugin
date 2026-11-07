@@ -118,6 +118,7 @@ void SampleLibrary::queueFile (const FileState& fs, QueueCounts& counts)
     task->file = f;
     task->regionStart = fs.start;
     task->regionEnd = fs.end;
+    task->delayMs = fs.delayMs;
     pending.push_back (task);
     getPool().addJob ([this, task] { runLoad (*task); });
     ++counts.queued;
@@ -219,6 +220,17 @@ void SampleLibrary::setRegion (int slot, int start, int end)
     notify();
 }
 
+void SampleLibrary::setDelay (int slot, float ms, bool commit)
+{
+    if (slot < 0 || slot >= numLoaded)
+        return;
+
+    slots[(size_t) slot]->delayMs.store (juce::jlimit (0.0f, SampleData::kMaxDelayMs, ms), std::memory_order_relaxed);
+
+    if (commit)
+        notify();
+}
+
 void SampleLibrary::setSelected (int slot)
 {
     if (numLoaded <= 0)
@@ -259,11 +271,12 @@ std::vector<SampleLibrary::FileState> SampleLibrary::getState() const
         FileState fs;
         fs.path = sample->path;
         sample->getRegion (fs.start, fs.end);
+        fs.delayMs = sample->delayMs.load();
         state.push_back (std::move (fs));
     }
 
     for (auto& t : pending)
-        state.push_back ({ t->file.getFullPathName(), t->regionStart, t->regionEnd });
+        state.push_back ({ t->file.getFullPathName(), t->regionStart, t->regionEnd, t->delayMs });
 
     return state;
 }
@@ -364,6 +377,7 @@ void SampleLibrary::handleAsyncUpdate()
                 slots[slot]->setRegion (rs, re);
             }
 
+            slots[slot]->delayMs.store (task->delayMs);
             audioSlots[slot].store (slots[slot].get(), std::memory_order_release);
         }
         else if (! task->cancelled.load())

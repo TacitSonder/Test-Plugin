@@ -56,6 +56,7 @@ private:
         double invFade = 0.0;                 // 1 / fade length in source frames
         double increment = 1.0;               // source frames per output frame
         float gain = 1.0f;
+        int delay = 0;                        // output frames still to wait before the sound starts
         juce::uint64 age = 0;
         bool unity = true;                    // increment == 1: SIMD copy path
     };

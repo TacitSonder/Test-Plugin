@@ -28,6 +28,11 @@ struct SampleData
     // read once per note-on by the audio thread. 0 = "not set" = whole file.
     mutable std::atomic<juce::uint64> region { 0 };
 
+    // Delay between the trigger and the start of the sound (ms). Written by the UI,
+    // read once per note-on by the audio thread.
+    static constexpr float kMaxDelayMs = 5000.0f;
+    mutable std::atomic<float> delayMs { 0.0f };
+
     // Set by the UI when the sample is taken out of the library; the audio thread
     // then drops any voice still playing it (the memory is kept alive until then).
     mutable std::atomic<bool> removed { false };

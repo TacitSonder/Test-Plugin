@@ -40,6 +40,7 @@ set(SAMPLER_UI_SOURCES
     Source/PluginEditor.cpp
     Source/WaveformView.cpp
     Source/SelectionOverlay.cpp
+    Source/TimelineView.cpp
     Source/FileMenuItem.cpp
     Source/PerfOverlay.cpp
 )

@@ -316,6 +316,51 @@ int main()
         CHECK (eng.getNumActiveVoices() == 4, "burst of clicks capped at 4 voices per block");
     }
 
+    std::printf ("[engine] start delay\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        CHECK (loadAll (lib, { p3 }), "loaded");
+        pm.prepare (48000.0); eng.prepare (48000.0);
+
+        lib.setDelay (0, 25.0f, true);                       // 25 ms = 1200 frames at 48 kHz
+        auto o = run (eng, 8192, 512, [] (int b, juce::MidiBuffer& m) { if (b == 0) m.addEvent (noteOn (60, 127), 100); });
+        bool silent = true; for (int i = 0; i < 100 + 1200; ++i) silent &= (o.L[(size_t) i] == 0.0f);
+        double err = 0; for (int k = 0; k < 5000; ++k) err = juce::jmax (err, (double) std::abs (o.L[(size_t) (1300 + k)] - genL (k)));
+        CHECK (silent, "silent until note position + delay (spans several blocks)");
+        CHECK (err < 1e-5, "sound starts exactly after the delay");
+        CHECK (eng.getNumActiveVoices() == 0, "voice freed after a delayed play");
+
+        lib.setDelay (0, 99999.0f, false);
+        CHECK (lib.getSample (0)->delayMs.load() == SampleData::kMaxDelayMs, "delay clamped to the maximum");
+        lib.setDelay (0, -5.0f, false);
+        CHECK (lib.getSample (0)->delayMs.load() == 0.0f, "negative delay clamped to 0");
+    }
+
+    std::printf ("[timeline] outline and ruler\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm);
+        CHECK (loadAll (lib, { p3 }), "loaded");
+        const auto s = lib.getSample (0);
+        juce::Path path; std::vector<float> a, b;
+        const juce::Rectangle<float> area (10.0f, 20.0f, 400.0f, 100.0f);
+
+        waveform::buildTimelineOutline (*s, 0, 5000, 1000.0, area, path, a, b);      // 5000 frames = 104 ms of a 1000 ms window
+        const auto bd = path.getBounds();
+        const float expectedW = 400.0f * (5000.0f / 48.0f) / 1000.0f;                // ~41.7 px
+        CHECK (! path.isEmpty() && std::abs (bd.getWidth() - expectedW) < 2.0f, "outline width = sound duration on the time axis");
+        CHECK (bd.getX() >= area.getX() - 0.01f && bd.getY() >= area.getY() - 0.01f && bd.getBottom() <= area.getBottom() + 0.01f, "outline inside the area");
+
+        waveform::buildTimelineOutline (*s, 0, 5000, 50.0, area, path, a, b);        // zoomed in: sound is longer than the window
+        CHECK (std::abs (path.getBounds().getWidth() - 399.0f) < 2.0f, "long sound fills the whole window");
+        waveform::buildTimelineOutline (*s, 1000, 1000, 1000.0, area, path, a, b);
+        CHECK (path.isEmpty(), "empty region gives an empty outline");
+
+        CHECK (waveform::niceTickStepMs (1000.0, 700.0, 70.0) == 100.0, "ruler step: 1000 ms over 700 px -> 100 ms");
+        CHECK (waveform::niceTickStepMs (100.0, 700.0, 70.0) == 10.0, "ruler step: 100 ms over 700 px -> 10 ms");
+        CHECK (waveform::niceTickStepMs (5000.0, 700.0, 70.0) == 500.0, "ruler step: 5000 ms over 700 px -> 500 ms");
+        CHECK (waveform::niceTickStepMs (300.0, 700.0, 70.0) == 50.0, "ruler step rounds up to 1/2/5");
+    }
+
     std::printf ("[engine] removing files while voices play\n");
     {
         perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
@@ -389,7 +434,7 @@ int main()
         const auto text = lines.joinIntoString ("\n");
         CHECK (lines.size() == perf::Monitor::kReportLines, "report line count");
         for (const char* name : { "processBlock", "midi", "voiceRender", "trigLatency", "fileDecode", "peakBuild",
-                                  "libCommit", "libRemove", "editorResize", "menuBuild", "wavePath", "wavePaint", "selPaint" })
+                                  "libCommit", "libRemove", "editorResize", "menuBuild", "wavePath", "wavePaint", "selPaint", "tlPath", "tlPaint" })
             CHECK (text.contains (name), name);
     }
 
@@ -403,6 +448,8 @@ int main()
             pumpUntil ([&] { return p.getLibrary().getNumLoaded() == 2; });
             p.getLibrary().setSelected (1);
             p.getLibrary().setRegion (1, 1000, 3000);
+            p.getLibrary().setDelay (1, 250.0f, true);
+            p.setScaleMs (2500);
             p.setEditorSize (900, 500);
             p.getStateInformation (state);
         }
@@ -415,10 +462,13 @@ int main()
         p2.getLibrary().getSample (0)->getRegion (s, e);
         CHECK (s == 0 && e == 1000, "untouched file still plays whole");
         CHECK (p2.getEditorWidth() == 900 && p2.getEditorHeight() == 500, "window size restored");
+        CHECK (p2.getLibrary().getSample (1)->delayMs.load() == 250.0f && p2.getLibrary().getSample (0)->delayMs.load() == 0.0f, "per-file delay restored");
+        CHECK (p2.getScaleMs() == 2500, "timeline scale restored");
 
         p2.setPlayConfigDetails (0, 2, 48000.0, 256);
         p2.prepareToPlay (48000.0, 256);
         juce::AudioBuffer<float> buf (2, 256);
+        p2.getLibrary().setDelay (1, 0.0f, false);          // the restored 250 ms delay would keep the first block silent
         p2.triggerFromGui();
         juce::MidiBuffer none;
         p2.processBlock (buf, none);

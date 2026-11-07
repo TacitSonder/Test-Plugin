@@ -125,6 +125,7 @@ void SamplerEngine::startVoice (int velocity) noexcept
     target->unity        = unity;
     target->increment    = step;
     target->gain         = (float) velocity * (1.0f / 127.0f);
+    target->delay        = (int) std::lround ((double) s->delayMs.load (std::memory_order_relaxed) * 0.001 * hostSampleRate);
     target->age          = ++ageCounter;
 }
 
@@ -153,6 +154,15 @@ void SamplerEngine::renderVoice (Voice& v, float* left, float* right, int n) noe
     const float* srcL = s.audio.getReadPointer (0);
     const float* srcR = s.numChannels > 1 ? s.audio.getReadPointer (1) : srcL;
     const bool stereo = s.numChannels > 1;
+
+    if (v.delay > 0)                                  // start delay: stay silent first
+    {
+        const int skip = juce::jmin (n, v.delay);
+        v.delay -= skip;
+        left += skip;
+        right += skip;
+        n -= skip;
+    }
 
     // A voice has up to three phases: fade-in, body, fade-out. The body is the
     // hot path (SIMD when the rates match); the fades are at most kFadeFrames long.

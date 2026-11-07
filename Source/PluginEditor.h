@@ -3,6 +3,7 @@
 #include "PerfOverlay.h"
 #include "PluginProcessor.h"
 #include "SelectionOverlay.h"
+#include "TimelineView.h"
 #include "WaveformView.h"
 
 // Dark theme for the combo box, its popup menu and the buttons. Owned by the
@@ -46,6 +47,9 @@ private:
     juce::TextButton perfButton { "Perf" };
     WaveformView waveform;
     SelectionOverlay selection;
+    TimelineView timeline;
+    juce::Slider scaleSlider;
+    juce::Rectangle<int> scaleLabelArea, contentArea;
     PerfOverlay overlay;
 
     juce::StringArray menuNames;         // what the dropdown currently shows (rebuilt only when it changes)

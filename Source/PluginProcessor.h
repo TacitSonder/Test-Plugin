@@ -44,6 +44,8 @@ public:
     int getEditorWidth() const noexcept     { return editorWidth.load(); }
     int getEditorHeight() const noexcept    { return editorHeight.load(); }
     void setEditorSize (int w, int h) noexcept { editorWidth.store (w); editorHeight.store (h); }
+    int getScaleMs() const noexcept         { return scaleMs.load(); }       // timeline zoom, saved with the project
+    void setScaleMs (int ms) noexcept       { scaleMs.store (ms); }
 
 private:
     void sampleLibraryChanged() override;   // keeps a copy of the state that is safe to read from any thread
@@ -53,7 +55,7 @@ private:
     SampleLibrary library;
     SamplerEngine engine;
 
-    std::atomic<int> editorWidth { 760 }, editorHeight { 440 };
+    std::atomic<int> editorWidth { 760 }, editorHeight { 640 }, scaleMs { 1000 };
 
     juce::CriticalSection stateLock;       // never taken on the audio thread
     std::vector<SampleLibrary::FileState> stateFiles;

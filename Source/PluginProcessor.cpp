@@ -54,6 +54,7 @@ void SamplerProcessor::getStateInformation (juce::MemoryBlock& destData)
     xml.setAttribute ("version", 1);
     xml.setAttribute ("width", editorWidth.load());
     xml.setAttribute ("height", editorHeight.load());
+    xml.setAttribute ("scale", scaleMs.load());
 
     {
         const juce::ScopedLock sl (stateLock);
@@ -65,6 +66,7 @@ void SamplerProcessor::getStateInformation (juce::MemoryBlock& destData)
             e->setAttribute ("path", f.path);
             e->setAttribute ("start", f.start);
             e->setAttribute ("end", f.end);
+            e->setAttribute ("delay", (double) f.delayMs);
         }
     }
 
@@ -80,13 +82,15 @@ void SamplerProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     editorWidth.store (xml->getIntAttribute ("width", editorWidth.load()));
     editorHeight.store (xml->getIntAttribute ("height", editorHeight.load()));
+    scaleMs.store (juce::jlimit (100, 5000, xml->getIntAttribute ("scale", scaleMs.load())));
 
     std::vector<SampleLibrary::FileState> files;
     for (auto* child : xml->getChildIterator())
         if (child->hasTagName ("Sample"))
             files.push_back ({ child->getStringAttribute ("path"),
                                child->getIntAttribute ("start", -1),
-                               child->getIntAttribute ("end", -1) });
+                               child->getIntAttribute ("end", -1),
+                               (float) child->getDoubleAttribute ("delay", 0.0) });
 
     const int selected = xml->getIntAttribute ("selected", 0);
 
