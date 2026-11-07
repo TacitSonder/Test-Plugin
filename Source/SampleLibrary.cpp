@@ -89,50 +89,65 @@ int SampleLibrary::addFiles (const juce::StringArray& paths)
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     statusMessage = {};
-    int queued = 0, unsupported = 0, ignored = 0;
+    QueueCounts counts;
 
     for (const auto& p : paths)
+        queueFile ({ p, -1, -1 }, counts);
+
+    finishQueueing (counts);
+    return counts.queued;
+}
+
+void SampleLibrary::queueFile (const FileState& fs, QueueCounts& counts)
+{
+    const juce::File f (fs.path);
+
+    if (! isSupportedFile (f))
     {
-        const juce::File f (p);
-
-        if (! isSupportedFile (f))
-        {
-            ++unsupported;
-            continue;
-        }
-
-        if (numLoaded + (int) pending.size() >= kMaxSamples)
-        {
-            ++ignored;
-            continue;
-        }
-
-        auto task = std::make_shared<LoadTask>();
-        task->file = f;
-        pending.push_back (task);
-        getPool().addJob ([this, task] { runLoad (*task); });
-        ++queued;
+        ++counts.unsupported;
+        return;
     }
 
-    if (ignored > 0)
-        statusMessage = plural (ignored, "file") + " ignored: the limit is " + juce::String (kMaxSamples)
-                        + " files (use Clear to start over)";
+    if (numLoaded + (int) pending.size() >= kMaxSamples)
+    {
+        ++counts.ignored;
+        return;
+    }
 
-    if (unsupported > 0)
+    auto task = std::make_shared<LoadTask>();
+    task->file = f;
+    task->regionStart = fs.start;
+    task->regionEnd = fs.end;
+    pending.push_back (task);
+    getPool().addJob ([this, task] { runLoad (*task); });
+    ++counts.queued;
+}
+
+void SampleLibrary::finishQueueing (const QueueCounts& counts)
+{
+    if (counts.ignored > 0)
+        statusMessage = plural (counts.ignored, "file") + " ignored: the limit is " + juce::String (kMaxSamples)
+                        + " files (remove one or use Clear)";
+
+    if (counts.unsupported > 0)
     {
         if (statusMessage.isNotEmpty())
             statusMessage << "; ";
-        statusMessage << plural (unsupported, "file") << " skipped (not a supported audio file)";
+        statusMessage << plural (counts.unsupported, "file") << " skipped (not a supported audio file)";
     }
 
     notify();
-    return queued;
 }
 
-void SampleLibrary::restore (const juce::StringArray& paths, int selectedIndex)
+void SampleLibrary::restore (const std::vector<FileState>& files, int selectedIndex)
 {
     clear();
-    addFiles (paths);
+
+    QueueCounts counts;
+    for (const auto& f : files)
+        queueFile (f, counts);
+
+    finishQueueing (counts);
     selected.store (juce::jlimit (0, kMaxSamples - 1, selectedIndex));
 }
 
@@ -147,11 +162,60 @@ void SampleLibrary::clear()
         a.store (nullptr);
 
     for (int i = 0; i < numLoaded; ++i)
+    {
+        slots[(size_t) i]->removed.store (true, std::memory_order_release);   // audio thread drops its voices
         retire (std::move (slots[(size_t) i]));
+    }
 
     numLoaded = 0;
     selected.store (0);
     statusMessage = {};
+    notify();
+}
+
+void SampleLibrary::removeSample (int slot)
+{
+    if (slot < 0 || slot >= numLoaded)
+        return;
+
+    perf::ScopedTimer timer (perfMon, perf::Id::LibraryRemove);
+
+    auto gone = std::move (slots[(size_t) slot]);
+
+    // 1) tell the audio thread to drop voices that play it, 2) close the gap,
+    // 3) keep the memory alive until the audio thread can no longer touch it.
+    gone->removed.store (true, std::memory_order_release);
+
+    for (int i = slot; i < numLoaded - 1; ++i)
+    {
+        slots[(size_t) i] = std::move (slots[(size_t) i + 1]);
+        audioSlots[(size_t) i].store (slots[(size_t) i].get(), std::memory_order_release);
+    }
+
+    --numLoaded;
+    slots[(size_t) numLoaded] = nullptr;
+    audioSlots[(size_t) numLoaded].store (nullptr, std::memory_order_release);
+
+    // Keep the same *file* selected where possible; if the selected one was removed,
+    // the file that moved into its place becomes selected.
+    int sel = selected.load();
+    if (slot < sel)
+        --sel;
+    selected.store (juce::jlimit (0, juce::jmax (0, numLoaded - 1), sel));
+
+    statusMessage = {};
+    retire (std::move (gone));
+    notify();
+}
+
+void SampleLibrary::setRegion (int slot, int start, int end)
+{
+    if (slot < 0 || slot >= numLoaded)
+        return;
+
+    const auto& sample = slots[(size_t) slot];
+    region::sanitize (start, end, sample->numFrames);
+    sample->setRegion (start, end);
     notify();
 }
 
@@ -184,17 +248,24 @@ size_t SampleLibrary::getTotalBytes() const
     return total;
 }
 
-juce::StringArray SampleLibrary::getPaths() const
+std::vector<SampleLibrary::FileState> SampleLibrary::getState() const
 {
-    juce::StringArray paths;
+    std::vector<FileState> state;
+    state.reserve ((size_t) numLoaded + pending.size());
 
     for (int i = 0; i < numLoaded; ++i)
-        paths.add (slots[(size_t) i]->path);
+    {
+        const auto& sample = slots[(size_t) i];
+        FileState fs;
+        fs.path = sample->path;
+        sample->getRegion (fs.start, fs.end);
+        state.push_back (std::move (fs));
+    }
 
     for (auto& t : pending)
-        paths.add (t->file.getFullPathName());
+        state.push_back ({ t->file.getFullPathName(), t->regionStart, t->regionEnd });
 
-    return paths;
+    return state;
 }
 
 void SampleLibrary::notify()
@@ -236,6 +307,7 @@ std::shared_ptr<SampleData> SampleLibrary::decode (LoadTask& task)
         data->numFrames     = numFrames;
         data->numChannels   = numCh;
         data->audio.setSize (numCh, numFrames + SampleData::kPadFrames);
+        data->setRegion (0, numFrames);
 
         for (int pos = 0; pos < numFrames; pos += kReadChunkFrames)
         {
@@ -284,6 +356,14 @@ void SampleLibrary::handleAsyncUpdate()
         {
             const auto slot = (size_t) numLoaded++;
             slots[slot] = std::move (task->result);
+
+            if (task->regionStart >= 0 && task->regionEnd > task->regionStart)
+            {
+                int rs = task->regionStart, re = task->regionEnd;
+                region::sanitize (rs, re, slots[slot]->numFrames);
+                slots[slot]->setRegion (rs, re);
+            }
+
             audioSlots[slot].store (slots[slot].get(), std::memory_order_release);
         }
         else if (! task->cancelled.load())

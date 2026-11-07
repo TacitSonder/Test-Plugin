@@ -32,14 +32,18 @@ namespace perf
         ProcessBlock = 0,   // whole processBlock()
         Midi,               // MIDI parsing + voice start (only blocks that contained MIDI)
         VoiceRender,        // sample playback mixing (only blocks with active voices)
+        TriggerLatency,     // Play-button click -> start of the audio block that handles it
         // loader threads
         FileDecode,         // decode one file from disk
         PeakBuild,          // build the waveform peaks of one file
         // message (UI) thread
         LibraryCommit,      // publish finished loads to the audio thread
+        LibraryRemove,      // remove one file
         EditorResize,       // editor resized(), including child layout
+        MenuBuild,          // rebuild the file dropdown
         WaveformPath,       // rebuild the waveform outline
         WaveformPaint,      // waveform paint()
+        SelectionPaint,     // selection overlay paint() (runs on every drag step)
         Count
     };
 
@@ -52,12 +56,16 @@ namespace perf
         { "processBlock", Thread::Audio   },
         { "midi",         Thread::Audio   },
         { "voiceRender",  Thread::Audio   },
+        { "trigLatency",  Thread::Audio   },
         { "fileDecode",   Thread::Loader  },
         { "peakBuild",    Thread::Loader  },
         { "libCommit",    Thread::Message },
+        { "libRemove",    Thread::Message },
         { "editorResize", Thread::Message },
+        { "menuBuild",    Thread::Message },
         { "wavePath",     Thread::Message },
         { "wavePaint",    Thread::Message },
+        { "selPaint",     Thread::Message },
     };
     static_assert (std::size (kInfo) == (size_t) Id::Count, "perf::kInfo must match perf::Id");
 

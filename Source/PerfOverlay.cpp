@@ -3,7 +3,7 @@
 
 namespace
 {
-    constexpr int kLineHeight = 16;
+    constexpr int kLineHeight = 14;
     constexpr int kPadding = 8;
 }
 

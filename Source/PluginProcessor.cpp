@@ -44,7 +44,7 @@ juce::AudioProcessorEditor* SamplerProcessor::createEditor()
 void SamplerProcessor::sampleLibraryChanged()
 {
     const juce::ScopedLock sl (stateLock);
-    statePaths = library.getPaths();
+    stateFiles = library.getState();
     stateSelected = library.getSelected();
 }
 
@@ -59,8 +59,13 @@ void SamplerProcessor::getStateInformation (juce::MemoryBlock& destData)
         const juce::ScopedLock sl (stateLock);
         xml.setAttribute ("selected", stateSelected);
 
-        for (const auto& p : statePaths)
-            xml.createNewChildElement ("Sample")->setAttribute ("path", p);
+        for (const auto& f : stateFiles)
+        {
+            auto* e = xml.createNewChildElement ("Sample");
+            e->setAttribute ("path", f.path);
+            e->setAttribute ("start", f.start);
+            e->setAttribute ("end", f.end);
+        }
     }
 
     copyXmlToBinary (xml, destData);
@@ -76,24 +81,26 @@ void SamplerProcessor::setStateInformation (const void* data, int sizeInBytes)
     editorWidth.store (xml->getIntAttribute ("width", editorWidth.load()));
     editorHeight.store (xml->getIntAttribute ("height", editorHeight.load()));
 
-    juce::StringArray paths;
+    std::vector<SampleLibrary::FileState> files;
     for (auto* child : xml->getChildIterator())
         if (child->hasTagName ("Sample"))
-            paths.add (child->getStringAttribute ("path"));
+            files.push_back ({ child->getStringAttribute ("path"),
+                               child->getIntAttribute ("start", -1),
+                               child->getIntAttribute ("end", -1) });
 
     const int selected = xml->getIntAttribute ("selected", 0);
 
     // The library lives on the message thread; hosts may call this from elsewhere.
     if (juce::MessageManager::getInstance()->isThisTheMessageThread())
     {
-        library.restore (paths, selected);
+        library.restore (files, selected);
     }
     else
     {
-        juce::MessageManager::callAsync ([weak = juce::WeakReference<SampleLibrary> (&library), paths, selected]
+        juce::MessageManager::callAsync ([weak = juce::WeakReference<SampleLibrary> (&library), files, selected]
         {
             if (auto* lib = weak.get())
-                lib->restore (paths, selected);
+                lib->restore (files, selected);
         });
     }
 }

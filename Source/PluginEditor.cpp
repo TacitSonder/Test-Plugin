@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "FileMenuItem.h"
 #include "UiTheme.h"
 
 SamplerLookAndFeel::SamplerLookAndFeel()
@@ -26,6 +27,7 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
       library (p.getLibrary()),
       perfMon (p.getPerf()),
       waveform (p.getPerf()),
+      selection (p.getPerf(), waveform),
       overlay (p.getPerf(), p.getLibrary())
 {
     setLookAndFeel (&lookAndFeel);
@@ -36,10 +38,19 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     fileBox.onChange = [this] { library.setSelected (fileBox.getSelectedId() - 1); };
     addAndMakeVisible (fileBox);
 
+    playButton.setComponentID ("playButton");
+    playButton.setTooltip ("Plays the selected file (MIDI note 60, middle C)");
+    playButton.setTriggeredOnMouseDown (true);          // fire on press, not on release
+    playButton.onClick = [this] { processor.triggerFromGui(); };
+    addAndMakeVisible (playButton);
+
     clearButton.onClick = [this] { library.clear(); };
     addAndMakeVisible (clearButton);
 
     addAndMakeVisible (waveform);
+
+    selection.onCommit = [this] (int start, int end) { library.setRegion (library.getSelected(), start, end); };
+    addAndMakeVisible (selection);                       // above the waveform, below the perf overlay
 
 #if SAMPLER_PERF_ENABLED
     perfButton.setComponentID ("perfButton");
@@ -53,9 +64,13 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     addChildComponent (overlay);   // added last so it paints on top of the waveform
 #endif
 
+    // Read the saved size first: setResizeLimits() clamps the (still empty) editor to the
+    // minimum size, and resized() would overwrite the saved size with it.
+    const int savedWidth = processor.getEditorWidth(), savedHeight = processor.getEditorHeight();
+
     setResizable (true, true);
-    setResizeLimits (480, 340, 2400, 1400);
-    setSize (processor.getEditorWidth(), processor.getEditorHeight());
+    setResizeLimits (480, 400, 2400, 1400);
+    setSize (savedWidth, savedHeight);
 
     library.addListener (this);
     refreshFromLibrary();
@@ -90,12 +105,15 @@ void SamplerEditor::resized()
 #endif
     clearButton.setBounds (bar.removeFromRight (buttonW));
     bar.removeFromRight (gap);
+    playButton.setBounds (bar.removeFromRight (buttonW));
+    bar.removeFromRight (gap);
     fileBox.setBounds (bar);
 
     r.removeFromTop (gap);
     statusArea = r.removeFromBottom (statusH);
     r.removeFromBottom (gap / 2);
     waveform.setBounds (r);
+    selection.setBounds (r);
 
     layoutOverlay();
 }
@@ -141,9 +159,36 @@ void SamplerEditor::refreshFromLibrary()
     const int n = library.getNumLoaded();
     const int sel = library.getSelected();
 
-    fileBox.clear (juce::dontSendNotification);
+    // Rebuild the dropdown only when the list of names changed (not on every region edit).
+    juce::StringArray names;
     for (int i = 0; i < n; ++i)
-        fileBox.addItem (juce::String (i + 1) + ":  " + library.getSample (i)->name, i + 1);
+        names.add (library.getSample (i)->name);
+
+    if (names != menuNames)
+    {
+        perf::ScopedTimer timer (perfMon, perf::Id::MenuBuild);
+        menuNames = names;
+
+        fileBox.clear (juce::dontSendNotification);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto title = juce::String (i + 1) + ":  " + names[i];
+
+            // The row's "x" asks us to remove file i. It runs after the menu has closed.
+            auto remove = [safe = juce::Component::SafePointer<SamplerEditor> (this), i]
+            {
+                juce::MessageManager::callAsync ([safe, i]
+                {
+                    if (safe != nullptr)
+                        safe->library.removeSample (i);
+                });
+            };
+
+            fileBox.getRootMenu()->addCustomItem (i + 1, std::make_unique<FileMenuItem> (title, std::move (remove)),
+                                                  nullptr, title);
+        }
+    }
 
     if (n > 0)
         fileBox.setSelectedId (sel + 1, juce::dontSendNotification);
@@ -151,6 +196,7 @@ void SamplerEditor::refreshFromLibrary()
     fileBox.setEnabled (n > 0);
     clearButton.setEnabled (n > 0 || library.getNumPending() > 0);
     waveform.setSample (library.getSample (sel));
+    selection.setSample (library.getSample (sel));
 
     statusText = juce::String (n) + " / " + juce::String (SampleLibrary::kMaxSamples) + " files loaded";
 

@@ -37,21 +37,31 @@ public:
         virtual void sampleLibraryChanged() = 0;   // message thread
     };
 
+    // What is saved in the project for each file.
+    struct FileState
+    {
+        juce::String path;
+        int start = -1;     // -1 = whole file
+        int end = -1;
+    };
+
     explicit SampleLibrary (perf::Monitor&);
     ~SampleLibrary() override;
 
     // ---- message thread only ------------------------------------------------
     bool isSupportedFile (const juce::File&) const;               // cheap extension test
     int  addFiles (const juce::StringArray& paths);                // returns number queued
-    void restore (const juce::StringArray& paths, int selectedIndex);
+    void restore (const std::vector<FileState>& files, int selectedIndex);
     void clear();
+    void removeSample (int slot);                                   // remove one file, later files move up
+    void setRegion (int slot, int start, int end);                  // which part of the file plays
     void setSelected (int slot);
     int  getSelected() const noexcept;                              // clamped for display
     int  getNumLoaded() const noexcept   { return numLoaded; }
     int  getNumPending() const noexcept  { return (int) pending.size(); }
     std::shared_ptr<const SampleData> getSample (int slot) const;
     size_t getTotalBytes() const;
-    juce::StringArray getPaths() const;                             // loaded + still loading
+    std::vector<FileState> getState() const;                        // loaded + still loading
     const juce::String& getStatusMessage() const noexcept { return statusMessage; }
     void addListener (Listener* l)     { listeners.add (l); }
     void removeListener (Listener* l)  { listeners.remove (l); }
@@ -68,6 +78,7 @@ private:
     struct LoadTask
     {
         juce::File file;
+        int regionStart = -1, regionEnd = -1;     // restored selection (-1 = whole file)
         std::shared_ptr<SampleData> result;
         juce::String error;
         std::atomic<bool> cancelled { false };
@@ -80,6 +91,10 @@ private:
         juce::uint64 epoch;
     };
 
+    struct QueueCounts { int queued = 0, unsupported = 0, ignored = 0; };
+
+    void queueFile (const FileState&, QueueCounts&);
+    void finishQueueing (const QueueCounts&);
     void handleAsyncUpdate() override;   // message thread: commit finished loads
     void timerCallback() override;       // message thread: free retired samples
     void runLoad (LoadTask&);            // loader thread

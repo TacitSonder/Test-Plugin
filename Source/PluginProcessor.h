@@ -38,6 +38,7 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     // used by the editor
+    void triggerFromGui() noexcept          { engine.requestTrigger(); }   // the "Play" button
     SampleLibrary& getLibrary() noexcept    { return library; }
     perf::Monitor& getPerf() noexcept       { return perfMonitor; }
     int getEditorWidth() const noexcept     { return editorWidth.load(); }
@@ -55,7 +56,7 @@ private:
     std::atomic<int> editorWidth { 760 }, editorHeight { 440 };
 
     juce::CriticalSection stateLock;       // never taken on the audio thread
-    juce::StringArray statePaths;
+    std::vector<SampleLibrary::FileState> stateFiles;
     int stateSelected = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SamplerProcessor)
