@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "LayerParams.h"
 #include "PerfMonitor.h"
 #include "SampleLibrary.h"
 #include "SamplerEngine.h"
@@ -40,6 +41,7 @@ public:
     // used by the editor
     void triggerFromGui() noexcept          { engine.requestTrigger(); }   // the "Play" button
     SampleLibrary& getLibrary() noexcept    { return library; }
+    LayerParams& getLayer() noexcept        { return layerParams; }          // speed + level of the (single, for now) layer
     perf::Monitor& getPerf() noexcept       { return perfMonitor; }
     int getEditorWidth() const noexcept     { return editorWidth.load(); }
     int getEditorHeight() const noexcept    { return editorHeight.load(); }
@@ -48,11 +50,13 @@ public:
     void setScaleMs (int ms) noexcept       { scaleMs.store (ms); }
 
 private:
-    void sampleLibraryChanged() override;   // keeps a copy of the state that is safe to read from any thread
+    void sampleLibraryChanged() override;
+    void restoreOnMessageThread (const std::vector<SampleLibrary::FileState>&, int selected, const juce::XmlElement* layerXml);   // keeps a copy of the state that is safe to read from any thread
 
     // Declaration order matters: the monitor and library must outlive the engine.
     perf::Monitor perfMonitor;
     SampleLibrary library;
+    LayerParams layerParams;
     SamplerEngine engine;
 
     std::atomic<int> editorWidth { 760 }, editorHeight { 640 }, scaleMs { 1000 };
@@ -61,5 +65,6 @@ private:
     std::vector<SampleLibrary::FileState> stateFiles;
     int stateSelected = 0;
 
+    JUCE_DECLARE_WEAK_REFERENCEABLE (SamplerProcessor)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SamplerProcessor)
 };

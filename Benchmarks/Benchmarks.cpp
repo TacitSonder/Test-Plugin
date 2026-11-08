@@ -138,7 +138,7 @@ int main()
 
     perf::Monitor pm;
     SampleLibrary lib (pm);
-    SamplerEngine eng (lib, pm);
+    LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
     pm.prepare (kSampleRate);
 
     juce::AudioBuffer<float> buf (2, kBlock);
@@ -190,6 +190,29 @@ int main()
         const auto burst = noteBurst (32);
         auto t = measure (9, 2000, [&] { eng.prepare (kSampleRate); }, [&] { processBlock (burst); });
         addBlockRow ("audio: 32 note-ons/block, 300-frame region with fades", t, 40.0, "retrigger storm: voice start + fade ramps");
+    }
+
+    if (loadOne (lib, file48))                       // layer modulation: speed knob / envelopes (32 voices)
+    {
+        const auto burst = noteBurst (32);
+        auto bench = [&] (const char* label, double limit, const char* note)
+        {
+            auto t = measure (7, 600, [&] { eng.prepare (kSampleRate); processBlock (burst); }, [&] { processBlock (noMidi); });
+            addBlockRow (juce::String ("audio: 32 voices, ") + label, t, limit, note);
+        };
+        lp.speed.setKnob (1.5f);
+        bench ("speed knob x1.5", 40.0, "interpolating path");
+        lp.speed.setKnob (1.0f);
+        lp.level.setEnvelopeMode (true);
+        bench ("level envelope", 40.0, "chunks of 32 frames, SIMD kept");
+        mod::Envelope wob; wob.count = 5; const float ys[] = { 0.4f, 0.8f, 0.5f, 0.9f, 0.5f };
+        for (int i = 0; i < 5; ++i) wob.pts[(size_t) i] = { 0.25f * (float) i, ys[i] };
+        lp.speed.setEnvelope (wob); lp.speed.setEnvelopeMode (true);
+        bench ("speed + level envelopes", 60.0, "worst case modulation");
+        lp.speed.setEnvelopeMode (false); lp.level.setEnvelopeMode (false);
+
+        auto t = measure (9, 1000, [] {}, [&] { lp.speed.setEnvelope (wob); });
+        addAbsRow ("mod: envelope edit (rebuild + publish table)", t, 200.0, "message thread, every drag step");
     }
 
     {   // MIDI parsing only (nothing loaded -> notes are ignored)

@@ -4,7 +4,8 @@
 SamplerProcessor::SamplerProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       library (perfMonitor),
-      engine (library, perfMonitor)
+      layerParams (perfMonitor),
+      engine (library, layerParams, perfMonitor)
 {
     library.addListener (this);
 }
@@ -70,6 +71,7 @@ void SamplerProcessor::getStateInformation (juce::MemoryBlock& destData)
         }
     }
 
+    layerParams.saveTo (xml);
     copyXmlToBinary (xml, destData);
 }
 
@@ -94,19 +96,32 @@ void SamplerProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     const int selected = xml->getIntAttribute ("selected", 0);
 
-    // The library lives on the message thread; hosts may call this from elsewhere.
+    std::shared_ptr<juce::XmlElement> layerXml;
+    if (auto* l = xml->getChildByName ("Layer"))
+        layerXml = std::make_shared<juce::XmlElement> (*l);
+
+    // The library and the parameter editors live on the message thread; hosts may call this from elsewhere.
     if (juce::MessageManager::getInstance()->isThisTheMessageThread())
     {
-        library.restore (files, selected);
+        restoreOnMessageThread (files, selected, layerXml.get());
     }
     else
     {
-        juce::MessageManager::callAsync ([weak = juce::WeakReference<SampleLibrary> (&library), files, selected]
+        juce::MessageManager::callAsync ([weak = juce::WeakReference<SamplerProcessor> (this), files, selected, layerXml]
         {
-            if (auto* lib = weak.get())
-                lib->restore (files, selected);
+            if (auto* p = weak.get())
+                p->restoreOnMessageThread (files, selected, layerXml.get());
         });
     }
+}
+
+void SamplerProcessor::restoreOnMessageThread (const std::vector<SampleLibrary::FileState>& files, int selected,
+                                               const juce::XmlElement* layerXml)
+{
+    library.restore (files, selected);
+
+    if (layerXml != nullptr)
+        layerParams.loadFrom (*layerXml);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

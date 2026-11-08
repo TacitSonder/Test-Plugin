@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <thread>
 
 static int failures = 0, checks = 0;
 #define CHECK(cond, msg) do { ++checks; if (! (cond)) { ++failures; std::printf ("  FAIL: %s  [line %d]\n", msg, __LINE__); } } while (0)
@@ -175,7 +176,7 @@ int main()
     // ------------------------------------------------------------------- engine
     std::printf ("[engine] unity-rate whole-file playback is sample exact\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p1, p2, p3 }), "loaded");
         pm.prepare (48000.0); eng.prepare (48000.0);
         lib.setSelected (2);
@@ -197,7 +198,7 @@ int main()
 
     std::printf ("[engine] playing only a selected region (with fades)\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p3 }), "loaded");
         pm.prepare (48000.0); eng.prepare (48000.0);
         const float g = 127.0f / 127.0f;
@@ -241,7 +242,7 @@ int main()
 
     std::printf ("[engine] 44.1k file on 48k host (rate conversion, also with a region)\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p1 }), "loaded");
         eng.prepare (48000.0);
         auto o = run (eng, 2048, 2048, [] (int, juce::MidiBuffer& m) { m.addEvent (noteOn (72, 127), 0); });
@@ -269,7 +270,7 @@ int main()
 
     std::printf ("[engine] mono source, polyphony, panic, note-off\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p2 }), "loaded");
         eng.prepare (48000.0);
         auto o = run (eng, 256, 256, [] (int, juce::MidiBuffer& m) { m.addEvent (noteOn (10, 127), 0); });
@@ -299,7 +300,7 @@ int main()
 
     std::printf ("[engine] GUI Play button trigger\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p3 }), "loaded");
         pm.prepare (48000.0); eng.prepare (48000.0);
 
@@ -324,7 +325,7 @@ int main()
 
     std::printf ("[engine] start delay\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p3 }), "loaded");
         pm.prepare (48000.0); eng.prepare (48000.0);
 
@@ -436,7 +437,7 @@ int main()
 
     std::printf ("[history] engine safety when removed audio comes back\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p3 }), "loaded");
         eng.prepare (48000.0);
         juce::AudioBuffer<float> buf (2, 256); juce::MidiBuffer none, midi; midi.addEvent (noteOn (60, 127), 0);
@@ -467,7 +468,7 @@ int main()
 
     std::printf ("[engine] removing files while voices play\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p1, p2, p3 }), "loaded");
         eng.prepare (48000.0);
         lib.setSelected (2);                                   // c_stereo48 (unity)
@@ -523,7 +524,7 @@ int main()
     // ------------------------------------------------------------- perf monitor
     std::printf ("[perf] counters and report\n");
     {
-        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
         CHECK (loadAll (lib, { p3 }), "loaded");
         pm.prepare (48000.0); eng.prepare (48000.0);
         juce::AudioBuffer<float> buf (2, 256);
@@ -540,11 +541,109 @@ int main()
         const auto text = lines.joinIntoString ("\n");
         CHECK (lines.size() == perf::Monitor::kReportLines, "report line count");
         for (const char* name : { "processBlock", "midi", "voiceRender", "trigLatency", "fileDecode", "peakBuild",
-                                  "libCommit", "libRemove", "libHistory", "editorResize", "menuBuild", "wavePath", "wavePaint", "selPaint", "tlPath", "tlPaint" })
+                                  "libCommit", "libRemove", "libHistory", "editorResize", "menuBuild", "wavePath", "wavePaint", "selPaint", "tlPath", "tlPaint", "modTable", "envPaint" })
             CHECK (text.contains (name), name);
     }
 
     // ----------------------------------------------------------------- processor
+    std::printf ("[mod] envelope model, table and lock-free hand-over\n");
+    {
+        const auto flat = mod::Envelope::flat (0.5f), gate = mod::Envelope::gate();
+        CHECK (flat.valueAt (0.3f) == 0.5f, "flat envelope");
+        CHECK (gate.valueAt (0.0f) == 1.0f && gate.valueAt (0.5f) == 1.0f && gate.valueAt (0.999f) == 1.0f && gate.valueAt (1.0f) == 0.0f, "gate: vertical edges at both ends");
+
+        auto e = mod::Envelope::flat (0.5f);
+        CHECK (e.addPoint (0.3f, 0.8f) == 2 && e.pts[2].x == 0.3f && e.pts[1].x < 0.3f && e.pts[3].x > 0.3f, "added point keeps the order");
+        while (e.count < mod::kMaxPoints) e.addPoint (0.9f, 0.1f);
+        CHECK (e.addPoint (0.5f, 0.5f) == -1, "at most 8 points");
+        e.removePoint (2);
+        CHECK (e.count == mod::kMaxPoints - 1, "remove a point");
+
+        mod::Envelope bad; bad.count = 3; bad.pts[0] = { 0.4f, 2.0f }; bad.pts[1] = { 0.2f, -1.0f }; bad.pts[2] = { 0.5f, 0.5f };
+        bad.normalize();
+        CHECK (bad.pts[0].x == 0.0f && bad.pts[2].x == 1.0f && bad.pts[1].x >= bad.pts[0].x && bad.pts[0].y == 1.0f && bad.pts[1].y == 0.0f, "normalize fixes order, ends and range");
+
+        perf::Monitor pm; LayerParams lp (pm);
+        CHECK (std::abs (lp.speed.toNorm (1.0f) - 0.5) < 1e-9 && std::abs (lp.speed.fromNorm (0.75) - 2.0f) < 1e-5f, "speed: logarithmic, x1 in the middle, x2 at 75 %");
+        lp.speed.setEnvelope (mod::Envelope::flat (0.75f));
+        CHECK (std::abs (lp.speed.readTable().at (0.5) - 2.0f) < 1e-5f, "published table holds real speed values");
+        lp.level.setKnob (7.0f); lp.speed.setKnob (0.0f);
+        CHECK (lp.level.getKnob() == 1.0f && lp.speed.getKnob() == 0.25f, "knobs are clamped to their range");
+
+        // one writer, one reader, nothing ever torn
+        mod::TripleBuffer<mod::EnvTable> tb; tb.fillAll ({});
+        std::atomic<bool> stop { false }; int torn = 0, reads = 0; float lastSeen = 0.0f; bool backwards = false;
+        std::thread writer ([&] { for (int i = 1; i <= 100000; ++i) { auto& b = tb.writeBuffer(); for (auto& v : b.v) v = (float) i; tb.publish(); } stop = true; });
+        while (! stop.load()) { const auto& tbl = tb.read(); const float f = tbl.v[0]; for (const float v : tbl.v) if (v != f) ++torn; if (f < lastSeen) backwards = true; lastSeen = f; ++reads; }
+        writer.join();
+        CHECK (torn == 0 && ! backwards && reads > 0, "triple buffer: no torn or out-of-order reads under contention");
+        CHECK (tb.read().v[0] == 100000.0f, "reader ends up with the last published value");
+    }
+
+    std::printf ("[engine] speed and level (knob and envelope)\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm); LayerParams lp (pm); SamplerEngine eng (lib, lp, pm);
+        CHECK (loadAll (lib, { p3 }), "loaded");
+        pm.prepare (48000.0);
+        auto play = [&] (int frames = 12288) { eng.prepare (48000.0); return run (eng, frames, 512, [] (int b, juce::MidiBuffer& m) { if (b == 0) m.addEvent (noteOn (60, 127), 0); }); };
+
+        lp.speed.setKnob (2.0f);
+        auto o = play();
+        double err = 0; for (int i = 0; i < 2500; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - genL (2 * i)));
+        bool tail = true; for (int i = 2501; i < 4096; ++i) tail &= (o.L[(size_t) i] == 0.0f);
+        CHECK (err < 1e-5 && tail && eng.getNumActiveVoices() == 0, "speed x2: plays every other frame, half as long");
+
+        lp.speed.setKnob (0.5f);
+        o = play();
+        err = 0; for (int i = 0; i < 9990; ++i) { const double p = i * 0.5; const int k = (int) p; err = juce::jmax (err, std::abs ((double) o.L[(size_t) i] - (genL (k) + (p - k) * (genL (k + 1) - genL (k))))); }
+        tail = true; for (int i = 10002; i < 12288; ++i) tail &= (o.L[(size_t) i] == 0.0f);
+        CHECK (err < 1e-4 && tail, "speed x0.5: interpolated, twice as long");
+
+        lp.speed.setKnob (1.0f); lp.level.setKnob (0.5f);
+        o = play();
+        err = 0; for (int i = 0; i < 5000; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - 0.5f * genL (i)));
+        CHECK (err < 1e-5, "level 0.5 halves the output");
+
+        // moving the knob is smoothed over the block (no zipper noise)
+        lp.level.setKnob (1.0f);
+        eng.prepare (48000.0);
+        juce::AudioBuffer<float> buf (2, 512); juce::MidiBuffer none, on; on.addEvent (noteOn (60, 127), 0);
+        eng.process (buf, on);
+        lp.level.setKnob (0.5f);
+        eng.process (buf, none);
+        err = 0; for (int k = 0; k < 512; ++k) err = juce::jmax (err, (double) std::abs (buf.getSample (0, k) - (1.0f - 0.5f * (float) k / 512.0f) * genL (512 + k)));
+        CHECK (err < 1e-5, "level change ramps linearly across the block");
+        eng.process (buf, none);
+        CHECK (std::abs (buf.getSample (0, 5) - 0.5f * genL (1024 + 5)) < 1e-5f, "then holds the new level");
+
+        // level envelope: straight line 1 -> 0 over the sound
+        lp.level.setKnob (1.0f);
+        mod::Envelope down; down.count = 2; down.pts[0] = { 0.0f, 1.0f }; down.pts[1] = { 1.0f, 0.0f };
+        lp.level.setEnvelope (down); lp.level.setEnvelopeMode (true);
+        o = play();
+        err = 0; for (int i = 0; i < 4990; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - (1.0 - (double) i / 5000.0) * genL (i)));
+        CHECK (err < 5e-4, "level envelope follows the sound position");
+        lp.level.setEnvelopeMode (false);
+
+        // speed envelope: flat at x1 changes nothing, flat at x2 equals the x2 knob
+        lp.speed.setEnvelope (mod::Envelope::flat (0.5f)); lp.speed.setEnvelopeMode (true);
+        o = play();
+        err = 0; for (int i = 0; i < 5000; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - genL (i)));
+        CHECK (err < 1e-5, "speed envelope flat at x1 = unmodulated playback");
+        lp.speed.setEnvelope (mod::Envelope::flat (0.75f));
+        o = play();
+        err = 0; for (int i = 0; i < 2480; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - genL (2 * i)));
+        CHECK (err < 1e-4 && eng.getNumActiveVoices() == 0, "speed envelope flat at x2 = the x2 knob");
+
+        // a wobbling speed envelope always terminates and never produces garbage
+        mod::Envelope wob; wob.count = 5; const float ys[] = { 0.1f, 0.9f, 0.3f, 1.0f, 0.0f };
+        for (int i = 0; i < 5; ++i) wob.pts[(size_t) i] = { 0.25f * (float) i, ys[i] };
+        lp.speed.setEnvelope (wob);
+        o = play (65536);
+        bool finite = true; for (const float v : o.L) finite &= std::isfinite (v) && std::abs (v) <= 1.0f;
+        CHECK (finite && eng.getNumActiveVoices() == 0, "wobbling speed envelope: finite output, voice ends");
+    }
+
     std::printf ("[processor] state round trip (files, region, selection, window size)\n");
     {
         juce::MemoryBlock state;
@@ -556,6 +655,9 @@ int main()
             p.getLibrary().setRegion (1, 1000, 3000);
             p.getLibrary().setDelay (1, 250.0f, true);
             p.setScaleMs (2500);
+            p.getLayer().speed.setKnob (1.5f);
+            p.getLayer().level.setKnob (0.67f);
+            { mod::Envelope e = mod::Envelope::flat (0.5f); e.addPoint (0.4f, 0.9f); p.getLayer().speed.setEnvelope (e); p.getLayer().speed.setEnvelopeMode (true); }
             p.setEditorSize (900, 500);
             p.getStateInformation (state);
         }
@@ -570,6 +672,9 @@ int main()
         CHECK (p2.getEditorWidth() == 900 && p2.getEditorHeight() == 500, "window size restored");
         CHECK (p2.getLibrary().getSample (1)->delayMs.load() == 250.0f && p2.getLibrary().getSample (0)->delayMs.load() == 0.0f, "per-file delay restored");
         CHECK (p2.getScaleMs() == 2500, "timeline scale restored");
+        const auto e2 = p2.getLayer().speed.getEnvelope();
+        CHECK (std::abs (p2.getLayer().speed.getKnob() - 1.5f) < 1e-6f && std::abs (p2.getLayer().level.getKnob() - 0.67f) < 1e-6f, "speed and level knobs restored");
+        CHECK (p2.getLayer().speed.isEnvelopeMode() && ! p2.getLayer().level.isEnvelopeMode() && e2.count == 6 && std::abs (e2.pts[2].y - 0.9f) < 1e-6f, "envelope mode and points restored");
 
         p2.setPlayConfigDetails (0, 2, 48000.0, 256);
         p2.prepareToPlay (48000.0, 256);

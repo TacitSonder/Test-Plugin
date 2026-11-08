@@ -40,11 +40,13 @@ namespace perf
         LibraryCommit,      // publish finished loads to the audio thread
         LibraryRemove,      // remove one file
         HistoryOp,          // record / undo / redo one history step
+        ModTable,           // rebuild + publish a modulation envelope (every edit step)
         EditorResize,       // editor resized(), including child layout
         MenuBuild,          // rebuild the file dropdown
         WaveformPath,       // rebuild the waveform outline
         WaveformPaint,      // waveform paint()
         SelectionPaint,     // selection overlay paint() (runs on every drag step)
+        EnvPaint,           // envelope editor paint()
         TimelinePath,       // rebuild the timeline waveform (scale / region / size change)
         TimelinePaint,      // timeline paint() (runs on every delay-drag step)
         Count
@@ -65,11 +67,13 @@ namespace perf
         { "libCommit",    Thread::Message },
         { "libRemove",    Thread::Message },
         { "libHistory",   Thread::Message },
+        { "modTable",     Thread::Message },
         { "editorResize", Thread::Message },
         { "menuBuild",    Thread::Message },
         { "wavePath",     Thread::Message },
         { "wavePaint",    Thread::Message },
         { "selPaint",     Thread::Message },
+        { "envPaint",     Thread::Message },
         { "tlPath",       Thread::Message },
         { "tlPaint",      Thread::Message },
     };

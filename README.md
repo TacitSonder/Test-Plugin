@@ -19,6 +19,13 @@ dropdown, optionally select part of it, and any MIDI note (or the Play button) p
   Clear, removing a file, selection edits and delay drags. Removed files come back instantly (their
   audio is kept in memory, no re-loading). History keeps the last 40 steps and at most 512 MB of
   removed audio; loading a project starts with an empty history.
+* **SPEED and LEVEL (right of the waveform):** SPEED is the playback rate, x0.25 to x4 (logarithmic,
+  x1 in the middle; it changes pitch and length). LEVEL is the volume, 0 to 1. Both apply live and knob
+  moves are smoothed. Double-click a knob to reset it. Flip **ENV / KNOB** under a control to replace the
+  knob with an envelope: click empty space to add a point (up to 8), drag points, double-click a point to
+  remove it. The envelope plays over the length of the selected part of the file (left = start of the
+  selection, right = its end). The first and last points only move up and down. The default LEVEL
+  envelope is a gate (instant start, hold, drop at the end); drag its second point to make an attack.
 * **Timeline (lower panel):** shows the selected part on a time axis in ms (0 = the moment you
   trigger). **SCALE** sets how much time the panel spans, 100 to 5000 ms. The **handle** under the
   waveform delays the sound: drag it (or click the track) and the waveform slides along the ruler;
@@ -57,7 +64,7 @@ dropdown, optionally select part of it, and any MIDI note (or the Play button) p
 * One row per measured section, with `avg` and `max` (this window), `peak` (whole session), `calls`:
   audio `processBlock`, `midi`, `voiceRender`, `trigLatency` (Play click to the block that starts it);
   loader `fileDecode`, `peakBuild`; UI `libCommit`, `libRemove`, `editorResize`, `menuBuild`,
-  `wavePath`, `wavePaint`, `selPaint`.
+  `wavePath`, `wavePaint`, `selPaint`, `tlPath`, `tlPaint`, `envPaint`, `modTable`, `libHistory`.
 * To measure new code add an entry to `perf::Id` and `perf::kInfo` in `PerfMonitor.h`, then put
   `perf::ScopedTimer t (monitor, perf::Id::MyThing);` at the top of the code.
 * Release build without any measurement code: configure with `-DSAMPLER_PERF_MONITOR=OFF`.

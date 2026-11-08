@@ -33,6 +33,7 @@ set(SAMPLER_CORE_SOURCES
     Source/SampleLibrary.cpp
     Source/SamplerEngine.cpp
     Source/WaveformGeometry.cpp
+    Source/LayerParams.cpp
 )
 # Plugin wrapper and user interface.
 set(SAMPLER_UI_SOURCES
@@ -41,6 +42,8 @@ set(SAMPLER_UI_SOURCES
     Source/WaveformView.cpp
     Source/SelectionOverlay.cpp
     Source/TimelineView.cpp
+    Source/EnvelopeEditor.cpp
+    Source/ModControl.cpp
     Source/FileMenuItem.cpp
     Source/PerfOverlay.cpp
 )

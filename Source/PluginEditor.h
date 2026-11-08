@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ModControl.h"
 #include "PerfOverlay.h"
 #include "PluginProcessor.h"
 #include "SelectionOverlay.h"
@@ -12,11 +13,15 @@ class SamplerLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     SamplerLookAndFeel();
+
+    void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos,
+                           float startAngle, float endAngle, juce::Slider&) override;
 };
 
 class SamplerEditor : public juce::AudioProcessorEditor,
                       public juce::FileDragAndDropTarget,
-                      private SampleLibrary::Listener
+                      private SampleLibrary::Listener,
+                      private juce::ChangeListener
 {
 public:
     explicit SamplerEditor (SamplerProcessor&);
@@ -34,6 +39,7 @@ public:
 
 private:
     void sampleLibraryChanged() override;
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;   // project loaded: refresh the controls
     void refreshFromLibrary();
     void layoutOverlay();
 
@@ -51,6 +57,7 @@ private:
     WaveformView waveform;
     SelectionOverlay selection;
     TimelineView timeline;
+    ModControl speedControl, levelControl;      // one pair per layer; today there is a single layer
     juce::Slider scaleSlider;
     juce::Rectangle<int> scaleLabelArea, contentArea;
     PerfOverlay overlay;

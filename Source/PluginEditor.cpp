@@ -25,6 +25,36 @@ SamplerLookAndFeel::SamplerLookAndFeel()
     setColour (juce::TextButton::textColourOnId, theme::text);
 }
 
+void SamplerLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float pos,
+                                           float startAngle, float endAngle, juce::Slider& slider)
+{
+    const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (6.0f);
+    const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
+    const auto centre = bounds.getCentre();
+    const float thickness = juce::jmax (4.0f, radius * 0.2f);
+    const float arcRadius = radius - thickness * 0.5f;
+    const float angle = startAngle + pos * (endAngle - startAngle);
+
+    juce::Path track, value;
+    track.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, startAngle, endAngle, true);
+    value.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, startAngle, angle, true);
+
+    g.setColour (theme::background);
+    g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+    g.setColour (theme::accent);
+    g.strokePath (value, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+
+    const float td = thickness * 1.5f;                                          // thumb
+    g.setColour (juce::Colours::white);
+    g.fillEllipse (juce::Rectangle<float> (td, td).withCentre ({ centre.x + arcRadius * std::sin (angle),
+                                                                  centre.y - arcRadius * std::cos (angle) }));
+
+    g.setColour (theme::subtle);                                                // value in the middle
+    g.setFont (juce::FontOptions (juce::jlimit (11.0f, 22.0f, radius * 0.36f)));
+    g.drawText (slider.getTextFromValue (slider.getValue()),
+                juce::Rectangle<float> (radius * 1.3f, radius * 0.6f).withCentre (centre), juce::Justification::centred, false);
+}
+
 // -----------------------------------------------------------------------------
 SamplerEditor::SamplerEditor (SamplerProcessor& p)
     : AudioProcessorEditor (&p),
@@ -34,6 +64,8 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
       waveform (p.getPerf()),
       selection (p.getPerf(), waveform),
       timeline (p.getPerf()),
+      speedControl ("SPEED", p.getLayer().speed, p.getPerf()),
+      levelControl ("LEVEL", p.getLayer().level, p.getPerf()),
       overlay (p.getPerf(), p.getLibrary())
 {
     setLookAndFeel (&lookAndFeel);
@@ -69,6 +101,9 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
 
     timeline.onDelayChanged = [this] (float ms, bool committed) { library.setDelay (library.getSelected(), ms, committed); };
     addAndMakeVisible (timeline);
+    addAndMakeVisible (speedControl);
+    addAndMakeVisible (levelControl);
+    processor.getLayer().addChangeListener (this);
 
     scaleSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     scaleSlider.setRange (100.0, 5000.0, 1.0);
@@ -103,7 +138,7 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     const int savedWidth = processor.getEditorWidth(), savedHeight = processor.getEditorHeight();
 
     setResizable (true, true);
-    setResizeLimits (480, 480, 2400, 1600);
+    setResizeLimits (560, 480, 2400, 1600);
     setSize (savedWidth, savedHeight);
 
     library.addListener (this);
@@ -112,6 +147,7 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
 
 SamplerEditor::~SamplerEditor()
 {
+    processor.getLayer().removeChangeListener (this);
     library.removeListener (this);
     setLookAndFeel (nullptr);
 }
@@ -159,6 +195,13 @@ void SamplerEditor::resized()
     r.removeFromBottom (gap / 2);
     timeline.setBounds (r.removeFromBottom ((int) ((float) r.getHeight() * 0.56f)));
     r.removeFromBottom (gap);
+
+    // SPEED and LEVEL sit beside the waveform, like one row of a layer
+    auto controls = r.removeFromRight (juce::jlimit (240, 340, w * 2 / 5));
+    r.removeFromRight (gap);
+    speedControl.setBounds (controls.removeFromLeft (controls.getWidth() / 2));
+    levelControl.setBounds (controls);
+
     waveform.setBounds (r);
     selection.setBounds (r);
 
@@ -208,6 +251,12 @@ bool SamplerEditor::keyPressed (const juce::KeyPress& key)
         || key == juce::KeyPress ('z', cmd | shift, 0)) { library.redo(); return true; }
 
     return false;
+}
+
+void SamplerEditor::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    speedControl.refresh();
+    levelControl.refresh();
 }
 
 // ---- library -> UI ----------------------------------------------------------
