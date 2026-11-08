@@ -40,6 +40,14 @@ namespace region
         }
     }
 
+    // Moves a region by `delta` frames, keeping its length and staying inside the file.
+    inline void shift (int start, int end, int delta, int numFrames, int& outStart, int& outEnd) noexcept
+    {
+        const int len = end - start;
+        outStart = juce::jlimit (0, juce::jmax (0, numFrames - len), start + delta);
+        outEnd = outStart + len;
+    }
+
     inline bool isFull (int start, int end, int numFrames) noexcept { return start <= 0 && end >= numFrames; }
 
     inline float frameToX (int frame, int numFrames, float left, float width) noexcept

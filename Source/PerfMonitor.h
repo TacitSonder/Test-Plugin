@@ -39,6 +39,7 @@ namespace perf
         // message (UI) thread
         LibraryCommit,      // publish finished loads to the audio thread
         LibraryRemove,      // remove one file
+        HistoryOp,          // record / undo / redo one history step
         EditorResize,       // editor resized(), including child layout
         MenuBuild,          // rebuild the file dropdown
         WaveformPath,       // rebuild the waveform outline
@@ -63,6 +64,7 @@ namespace perf
         { "peakBuild",    Thread::Loader  },
         { "libCommit",    Thread::Message },
         { "libRemove",    Thread::Message },
+        { "libHistory",   Thread::Message },
         { "editorResize", Thread::Message },
         { "menuBuild",    Thread::Message },
         { "wavePath",     Thread::Message },

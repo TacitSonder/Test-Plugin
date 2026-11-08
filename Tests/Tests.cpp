@@ -101,6 +101,12 @@ int main()
         CHECK (region::hitEdge (298.0f, 100.0f, 300.0f, 7.0f) == region::Edge::End, "hit end");
         CHECK (region::hitEdge (200.0f, 100.0f, 300.0f, 7.0f) == region::Edge::None, "no hit in the middle");
         CHECK (region::hitEdge (200.0f, 198.0f, 202.0f, 7.0f) != region::Edge::None, "nearer edge wins when close");
+        region::shift (100, 300, 50, 1000, s, e);
+        CHECK (s == 150 && e == 350, "shift moves the region");
+        region::shift (100, 300, 5000, 1000, s, e);
+        CHECK (s == 800 && e == 1000, "shift stops at the file end, keeping the length");
+        region::shift (100, 300, -5000, 1000, s, e);
+        CHECK (s == 0 && e == 200, "shift stops at the file start, keeping the length");
 
         SampleData d; d.numFrames = 1000;
         d.getRegion (s, e);
@@ -124,7 +130,7 @@ int main()
         CHECK (lib.getSample (0)->name == "a_stereo44.wav" && lib.getSample (1)->name == "b_mono48.wav"
                && lib.getSample (2)->name == "c_stereo48.wav", "drop order preserved");
         CHECK (lib.getSample (0)->numChannels == 2 && lib.getSample (1)->numChannels == 1, "channel counts");
-        CHECK (lib.getSample (0)->numPeakBuckets == 1000, "peak buckets = frames when short");
+        CHECK (lib.getSample (0)->numPeakBuckets == 4, "one peak pair per 256 frames (1000 frames -> 4)");
         CHECK (lib.getStatusMessage().contains ("skipped"), "unsupported file reported");
 
         int s, e; lib.getSample (2)->getRegion (s, e);
@@ -361,6 +367,104 @@ int main()
         CHECK (waveform::niceTickStepMs (300.0, 700.0, 70.0) == 50.0, "ruler step rounds up to 1/2/5");
     }
 
+    std::printf ("[history] undo / redo\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm);
+        CHECK (! lib.canUndo() && ! lib.canRedo(), "empty history at start");
+
+        CHECK (loadAll (lib, { p1, p2, p3 }), "loaded 3");
+        CHECK (lib.getHistoryDepth() == 1, "importing 3 files at once = ONE step");
+        const auto a = lib.getSample (0), b = lib.getSample (1), c = lib.getSample (2);
+
+        lib.undo();
+        CHECK (lib.getNumLoaded() == 0 && lib.canRedo(), "undo import removes the imported files");
+        lib.redo();
+        CHECK (lib.getNumLoaded() == 3 && lib.getSample (0) == a && lib.getSample (2) == c, "redo brings the same audio back (no re-decoding)");
+
+        // remove one file that has an edited region and delay, then undo
+        lib.setRegion (1, 1000, 1500); lib.setDelay (1, 40.0f, true); lib.setSelected (1);
+        const int depth = lib.getHistoryDepth();
+        lib.removeSample (1);
+        CHECK (lib.getNumLoaded() == 2 && lib.getHistoryDepth() == depth + 1, "remove is one step");
+        lib.undo();
+        int s, e;
+        CHECK (lib.getNumLoaded() == 3 && lib.getSample (1) == b, "undo remove restores the file at its position");
+        b->getRegion (s, e);
+        CHECK (s == 1000 && e == 1500 && b->delayMs.load() == 40.0f, "restored file keeps its region and delay");
+        CHECK (lib.getSelected() == 1, "selection restored");
+
+        // clear all, undo
+        lib.setSelected (2);
+        lib.clear();
+        CHECK (lib.getNumLoaded() == 0, "cleared");
+        lib.undo();
+        CHECK (lib.getNumLoaded() == 3 && lib.getSelected() == 2 && lib.getSample (0) == a, "undo clear restores every file");
+        lib.clear(); lib.clear();                                   // second clear changes nothing
+        const int d2 = lib.getHistoryDepth();
+        lib.clear();
+        CHECK (lib.getHistoryDepth() == d2, "a no-op is not recorded");
+        lib.undo();
+
+        // region edit and a delay drag (many steps, one undo)
+        lib.setRegion (2, 2000, 3000);                              // slot 2 is the 5000-frame file
+        lib.undo();
+        c->getRegion (s, e);
+        CHECK (s == 0 && e == 5000, "undo region edit");
+        lib.redo();
+        c->getRegion (s, e);
+        CHECK (s == 2000 && e == 3000, "redo region edit");
+
+        const int d3 = lib.getHistoryDepth();
+        lib.setDelay (0, 10.0f, false); lib.setDelay (0, 20.0f, false); lib.setDelay (0, 30.0f, true);
+        CHECK (lib.getHistoryDepth() == d3 + 1 && a->delayMs.load() == 30.0f, "a whole delay drag is one step");
+        lib.undo();
+        CHECK (a->delayMs.load() == 0.0f, "undo delay drag returns to the value before the drag");
+
+        // a new edit discards the redo branch
+        CHECK (lib.canRedo(), "redo available after undo");
+        lib.setRegion (0, 100, 900);
+        CHECK (! lib.canRedo(), "new edit clears redo");
+
+        // history is bounded
+        for (int i = 0; i < 100; ++i) lib.setRegion (0, 100 + i, 900 + i);
+        CHECK (lib.getHistoryDepth() <= 40, "history limited to 40 steps");
+
+        // loading a project is not undoable
+        lib.restore ({ { p1, -1, -1, 0.0f } }, 0);
+        CHECK (pumpUntil ([&] { return lib.getNumLoaded() == 1; }) && ! lib.canUndo(), "project load starts with a clean history");
+    }
+
+    std::printf ("[history] engine safety when removed audio comes back\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
+        CHECK (loadAll (lib, { p3 }), "loaded");
+        eng.prepare (48000.0);
+        juce::AudioBuffer<float> buf (2, 256); juce::MidiBuffer none, midi; midi.addEvent (noteOn (60, 127), 0);
+        eng.process (buf, midi);
+        lib.removeSample (0);
+        eng.process (buf, none);
+        CHECK (eng.getNumActiveVoices() == 0 && buf.getMagnitude (0, 256) == 0.0f, "voice of removed file dropped");
+        lib.undo();
+        eng.process (buf, midi);
+        CHECK (eng.getNumActiveVoices() == 1 && buf.getMagnitude (0, 256) > 0.1f, "restored file plays again");
+    }
+
+    std::printf ("[waveform] zoomed outline\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm);
+        CHECK (loadAll (lib, { p3 }), "loaded");
+        const auto smp = lib.getSample (0);
+        juce::Path path; std::vector<float> a, b;
+        const juce::Rectangle<float> area (0.0f, 0.0f, 400.0f, 100.0f);
+
+        waveform::buildOutline (*smp, 1000.0, 1100, 100.0 / 400.0, area, path, a, b);        // 100 frames over 400 px: reads the audio
+        CHECK (! path.isEmpty() && path.getBounds().getWidth() > 395.0f, "deep zoom fills the area");
+        waveform::buildOutline (*smp, 0.0, 5000, 5000.0 / 8.0, juce::Rectangle<float> (0.0f, 0.0f, 8.0f, 100.0f), path, a, b);   // 625 frames/px: uses the peaks
+        CHECK (! path.isEmpty() && path.getBounds().getWidth() > 6.0f, "zoomed-out view built from peaks");
+        waveform::buildOutline (*smp, 4990.0, 5000, 0.05, area, path, a, b);                  // 10 frames only: partial window
+        CHECK (! path.isEmpty() && path.getBounds().getWidth() < 250.0f, "view ending at the file end draws only what exists");
+    }
+
     std::printf ("[engine] removing files while voices play\n");
     {
         perf::Monitor pm; SampleLibrary lib (pm); SamplerEngine eng (lib, pm);
@@ -384,7 +488,9 @@ int main()
         eng.process (buf, none);
         CHECK (eng.getNumActiveVoices() == 0 && buf.getMagnitude (0, 256) == 0.0f, "voice of removed file dropped, no audio from freed data");
         eng.process (buf, none); eng.process (buf, none);
-        CHECK (pumpUntil ([&] { return weakA.expired() && weakC.expired(); }, 3000), "memory freed once audio moved on");
+        CHECK (! weakA.expired(), "history keeps removed audio so it can be restored");
+        lib.clearHistory();
+        CHECK (pumpUntil ([&] { return weakA.expired() && weakC.expired(); }, 3000), "memory freed once audio moved on and history released");
     }
 
     std::printf ("[library] destroying while loads are in flight\n");
@@ -434,7 +540,7 @@ int main()
         const auto text = lines.joinIntoString ("\n");
         CHECK (lines.size() == perf::Monitor::kReportLines, "report line count");
         for (const char* name : { "processBlock", "midi", "voiceRender", "trigLatency", "fileDecode", "peakBuild",
-                                  "libCommit", "libRemove", "editorResize", "menuBuild", "wavePath", "wavePaint", "selPaint", "tlPath", "tlPaint" })
+                                  "libCommit", "libRemove", "libHistory", "editorResize", "menuBuild", "wavePath", "wavePaint", "selPaint", "tlPath", "tlPaint" })
             CHECK (text.contains (name), name);
     }
 

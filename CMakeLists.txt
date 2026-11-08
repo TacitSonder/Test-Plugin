@@ -86,7 +86,7 @@ target_link_libraries(HelloPlugin
 # ----------------------------------------------------------- developer targets
 if(SAMPLER_SANITIZE AND NOT MSVC)
     set(SAMPLER_SAN_FLAGS -fsanitize=address,undefined -fno-omit-frame-pointer)
-    set_source_files_properties(${SAMPLER_CORE_SOURCES} ${SAMPLER_UI_SOURCES} Tests/Tests.cpp
+    set_source_files_properties(${SAMPLER_CORE_SOURCES} ${SAMPLER_UI_SOURCES} Tests/Tests.cpp Benchmarks/Benchmarks.cpp
                                 PROPERTIES COMPILE_OPTIONS "${SAMPLER_SAN_FLAGS}")
 endif()
 
@@ -113,4 +113,7 @@ if(SAMPLER_BUILD_BENCHMARKS)
             juce::juce_events
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags)
+    if(SAMPLER_SANITIZE AND NOT MSVC)
+        target_link_options(SamplerBenchmarks PRIVATE ${SAMPLER_SAN_FLAGS})
+    endif()
 endif()

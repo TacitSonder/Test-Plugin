@@ -13,7 +13,7 @@
 struct SampleData
 {
     static constexpr int kPadFrames      = 4;     // zeroed frames after the audio (safe interpolation reads)
-    static constexpr int kMaxPeakBuckets = 4096;  // waveform resolution kept for drawing
+    static constexpr int kPeakFrames     = 256;   // frames summarised by one (min, max) peak pair
 
     juce::String name;                // file name, e.g. "kick.wav"
     juce::String path;                // full path (saved in the project state)
@@ -21,7 +21,7 @@ struct SampleData
     int numFrames = 0;
     int numChannels = 0;              // 1 or 2 (extra channels are dropped)
     juce::AudioBuffer<float> audio;   // numChannels x (numFrames + kPadFrames)
-    std::vector<float> peaks;         // interleaved (min, max) per bucket
+    std::vector<float> peaks;         // interleaved (min, max) per kPeakFrames frames
     int numPeakBuckets = 0;
 
     // Part of the file that plays, packed (start | end << 32). Written by the UI,

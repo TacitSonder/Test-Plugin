@@ -26,6 +26,15 @@ public:
     juce::Rectangle<float> getWaveArea() const noexcept { return waveArea; }
     int getInfoWidth() const noexcept { return infoWidth; }     // pixels used by the file info text
 
+    // Visible part of the file, in frames. Changing it rebuilds the outline (cost ~ window width).
+    double getViewStart() const noexcept  { return viewStart; }
+    double getViewLength() const noexcept { return viewLen; }
+    bool isZoomed() const noexcept        { return sample != nullptr && viewLen < (double) sample->numFrames - 0.5; }
+    void setView (double start, double length);
+    void zoomAt (double anchorFraction, double factor);    // factor < 1 zooms in around that point of the view
+    void pan (double deltaFrames)         { setView (viewStart + deltaFrames, viewLen); }
+    void zoomToFit()                      { setView (0.0, sample != nullptr ? (double) sample->numFrames : 0.0); }
+
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -38,6 +47,7 @@ private:
     juce::Rectangle<float> waveArea;
     juce::String info;
     int infoWidth = 0;
+    double viewStart = 0.0, viewLen = 0.0;
     std::vector<float> columnTop, columnBottom;   // scratch, reused between rebuilds
     bool dropHighlight = false;
 

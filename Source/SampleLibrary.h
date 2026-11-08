@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <deque>
+#include <optional>
 #include <memory>
 #include <vector>
 
@@ -68,6 +69,16 @@ public:
     void addListener (Listener* l)     { listeners.add (l); }
     void removeListener (Listener* l)  { listeners.remove (l); }
 
+    // Undo / redo: import, clear, remove, region and delay edits. A step stores the library's
+    // content before the change (shared pointers, so removed audio is restored instantly with
+    // no re-decoding). Bounded by step count and by the audio memory only history keeps alive.
+    bool canUndo() const noexcept          { return ! undoStack.empty(); }
+    bool canRedo() const noexcept          { return ! redoStack.empty(); }
+    int  getHistoryDepth() const noexcept  { return (int) undoStack.size(); }
+    void undo();
+    void redo();
+    void clearHistory();
+
     // ---- audio thread (lock-free, allocation-free) --------------------------
     void beginAudioBlock() noexcept    { audioBlockCounter.fetch_add (1, std::memory_order_acq_rel); }
     const SampleData* getForAudio (int slot) const noexcept
@@ -94,6 +105,29 @@ private:
         juce::uint64 epoch;
     };
 
+    struct Entry
+    {
+        std::shared_ptr<const SampleData> sample;
+        int start = 0, end = 0;
+        float delayMs = 0.0f;
+    };
+
+    struct Snapshot
+    {
+        std::vector<Entry> entries;
+        int selected = 0;
+    };
+
+    static constexpr size_t kMaxHistorySteps = 40;
+    static constexpr size_t kMaxHistoryBytes = 512ull << 20;   // removed audio kept only for undo
+
+    Snapshot makeSnapshot() const;
+    static bool sameContent (const Snapshot&, const Snapshot&) noexcept;
+    void applySnapshot (const Snapshot&);
+    void pushHistory (Snapshot before);
+    void trimHistory();
+    void clearInternal (bool recordHistory);
+
     struct QueueCounts { int queued = 0, unsupported = 0, ignored = 0; };
 
     void queueFile (const FileState&, QueueCounts&);
@@ -117,6 +151,9 @@ private:
     std::deque<std::shared_ptr<LoadTask>> pending;
     std::vector<Retired> retired;
     juce::String statusMessage;
+    std::deque<Snapshot> undoStack, redoStack;
+    std::optional<Snapshot> importBefore;   // state before the import batch that is loading
+    std::optional<Snapshot> dragBefore;     // state before a delay drag that is in progress
     juce::ListenerList<Listener> listeners;
 
     // shared with the audio thread

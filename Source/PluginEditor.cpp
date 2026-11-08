@@ -44,6 +44,15 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     fileBox.onChange = [this] { library.setSelected (fileBox.getSelectedId() - 1); };
     addAndMakeVisible (fileBox);
 
+    undoButton.setTooltip ("Undo (Ctrl+Z): import, clear, remove, selection and delay edits");
+    undoButton.onClick = [this] { library.undo(); };
+    addAndMakeVisible (undoButton);
+
+    redoButton.setTooltip ("Redo (Ctrl+Y)");
+    redoButton.onClick = [this] { library.redo(); };
+    addAndMakeVisible (redoButton);
+    setWantsKeyboardFocus (true);
+
     playButton.setComponentID ("playButton");
     playButton.setTooltip ("Plays the selected file (MIDI note 60, middle C)");
     playButton.setTriggeredOnMouseDown (true);          // fire on press, not on release
@@ -132,6 +141,10 @@ void SamplerEditor::resized()
     bar.removeFromRight (gap);
     playButton.setBounds (bar.removeFromRight (buttonW));
     bar.removeFromRight (gap);
+    redoButton.setBounds (bar.removeFromRight (buttonW * 4 / 5));
+    bar.removeFromRight (gap);
+    undoButton.setBounds (bar.removeFromRight (buttonW * 4 / 5));
+    bar.removeFromRight (gap);
     fileBox.setBounds (bar);
 
     r.removeFromTop (gap);
@@ -186,6 +199,17 @@ void SamplerEditor::paint (juce::Graphics& g)
     g.drawText (statusText, area, juce::Justification::centredLeft, true);
 }
 
+bool SamplerEditor::keyPressed (const juce::KeyPress& key)
+{
+    const auto cmd = juce::ModifierKeys::commandModifier, shift = juce::ModifierKeys::shiftModifier;
+
+    if (key == juce::KeyPress ('z', cmd, 0))          { library.undo(); return true; }
+    if (key == juce::KeyPress ('y', cmd, 0)
+        || key == juce::KeyPress ('z', cmd | shift, 0)) { library.redo(); return true; }
+
+    return false;
+}
+
 // ---- library -> UI ----------------------------------------------------------
 void SamplerEditor::sampleLibraryChanged()
 {
@@ -233,6 +257,8 @@ void SamplerEditor::refreshFromLibrary()
 
     fileBox.setEnabled (n > 0);
     clearButton.setEnabled (n > 0 || library.getNumPending() > 0);
+    undoButton.setEnabled (library.canUndo());
+    redoButton.setEnabled (library.canRedo());
     waveform.setSample (library.getSample (sel));
     selection.setSample (library.getSample (sel));
     timeline.setSample (library.getSample (sel));

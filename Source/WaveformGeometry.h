@@ -9,19 +9,21 @@
 
 namespace waveform
 {
-    // Builds the filled outline of the waveform for a pixel area, from the
-    // precomputed peaks: O(area width), independent of the file length.
-    // `scratchTop` / `scratchBottom` are reused between calls to avoid allocation.
-    void buildOutline (const SampleData& sample,
-                       juce::Rectangle<float> area,
-                       juce::Path& outline,
-                       std::vector<float>& scratchTop,
-                       std::vector<float>& scratchBottom);
+    // Core: filled min/max outline of the audio from `firstFrame` to `endFrame`, one pixel column
+    // per `framesPerColumn` frames, starting at area.getX(). Zoomed out (>= 2 peak buckets per
+    // column) it reads the precomputed peaks: O(columns + visible/256). Zoomed in it reads the
+    // audio itself with SIMD: O(visible frames), at most ~512 x width. Either way the cost never
+    // depends on the file length. `scratch*` are reused between calls (no allocation).
+    void buildOutline (const SampleData& sample, double firstFrame, int endFrame, double framesPerColumn,
+                       juce::Rectangle<float> area, juce::Path& outline,
+                       std::vector<float>& scratchTop, std::vector<float>& scratchBottom);
 
-    // The part of the file that plays, drawn on a time axis: x = 0 is the trigger moment and
-    // `area.getWidth()` pixels span `scaleMs`. Min/max are read from the audio itself (SIMD),
-    // so detail is exact at any zoom; cost is proportional to the *visible* frames only.
-    // The outline starts at area.getX() (no delay applied: the caller shifts it).
+    // Whole file stretched over the area.
+    void buildOutline (const SampleData& sample, juce::Rectangle<float> area, juce::Path& outline,
+                       std::vector<float>& scratchTop, std::vector<float>& scratchBottom);
+
+    // The part of the file that plays, on a time axis: x = 0 is the trigger moment and the area's
+    // width spans `scaleMs`. No delay applied (the caller shifts the outline).
     void buildTimelineOutline (const SampleData& sample, int regionStart, int regionEnd, double scaleMs,
                                juce::Rectangle<float> area, juce::Path& outline,
                                std::vector<float>& scratchTop, std::vector<float>& scratchBottom);

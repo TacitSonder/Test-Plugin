@@ -5,10 +5,12 @@ namespace
     constexpr int    kReadChunkFrames = 1 << 16;   // decode in chunks so a cancel is noticed quickly
     constexpr double kMaxFileSeconds  = 600.0;     // guards against accidentally dropping huge files
 
+    // One (min, max) pair per kPeakFrames frames: lets the waveform view draw any zoom level
+    // without scanning the audio, and costs only ~0.4 % extra memory.
     void buildPeaks (SampleData& d)
     {
         const int n  = d.numFrames;
-        const int nb = juce::jmin (SampleData::kMaxPeakBuckets, n);
+        const int nb = (n + SampleData::kPeakFrames - 1) / SampleData::kPeakFrames;
         d.numPeakBuckets = nb;
         d.peaks.assign ((size_t) nb * 2, 0.0f);
 
@@ -17,15 +19,15 @@ namespace
 
         for (int i = 0; i < nb; ++i)
         {
-            const int s = (int) ((juce::int64) i * n / nb);
-            const int e = (int) ((juce::int64) (i + 1) * n / nb);   // e > s because nb <= n
+            const int s = i * SampleData::kPeakFrames;
+            const int count = juce::jmin (SampleData::kPeakFrames, n - s);
 
-            auto range = juce::FloatVectorOperations::findMinAndMax (l + s, e - s);
+            auto range = juce::FloatVectorOperations::findMinAndMax (l + s, count);
             float mn = range.getStart(), mx = range.getEnd();
 
             if (r != nullptr)
             {
-                auto rr = juce::FloatVectorOperations::findMinAndMax (r + s, e - s);
+                auto rr = juce::FloatVectorOperations::findMinAndMax (r + s, count);
                 mn = juce::jmin (mn, rr.getStart());
                 mx = juce::jmax (mx, rr.getEnd());
             }
@@ -114,6 +116,9 @@ void SampleLibrary::queueFile (const FileState& fs, QueueCounts& counts)
         return;
     }
 
+    if (pending.empty() && ! importBefore)
+        importBefore = makeSnapshot();
+
     auto task = std::make_shared<LoadTask>();
     task->file = f;
     task->regionStart = fs.start;
@@ -142,18 +147,28 @@ void SampleLibrary::finishQueueing (const QueueCounts& counts)
 
 void SampleLibrary::restore (const std::vector<FileState>& files, int selectedIndex)
 {
-    clear();
+    clearInternal (false);
 
     QueueCounts counts;
     for (const auto& f : files)
         queueFile (f, counts);
 
+    importBefore.reset();           // loading a project is not an undoable import
+    clearHistory();
     finishQueueing (counts);
     selected.store (juce::jlimit (0, kMaxSamples - 1, selectedIndex));
 }
 
 void SampleLibrary::clear()
 {
+    clearInternal (true);
+}
+
+void SampleLibrary::clearInternal (bool recordHistory)
+{
+    auto before = makeSnapshot();
+    importBefore.reset();
+
     for (auto& t : pending)
         t->cancelled.store (true);
     pending.clear();
@@ -171,6 +186,10 @@ void SampleLibrary::clear()
     numLoaded = 0;
     selected.store (0);
     statusMessage = {};
+
+    if (recordHistory)
+        pushHistory (std::move (before));
+
     notify();
 }
 
@@ -181,6 +200,7 @@ void SampleLibrary::removeSample (int slot)
 
     perf::ScopedTimer timer (perfMon, perf::Id::LibraryRemove);
 
+    auto before = makeSnapshot();
     auto gone = std::move (slots[(size_t) slot]);
 
     // 1) tell the audio thread to drop voices that play it, 2) close the gap,
@@ -206,6 +226,7 @@ void SampleLibrary::removeSample (int slot)
 
     statusMessage = {};
     retire (std::move (gone));
+    pushHistory (std::move (before));
     notify();
 }
 
@@ -216,7 +237,10 @@ void SampleLibrary::setRegion (int slot, int start, int end)
 
     const auto& sample = slots[(size_t) slot];
     region::sanitize (start, end, sample->numFrames);
+
+    auto before = makeSnapshot();
     sample->setRegion (start, end);
+    pushHistory (std::move (before));    // skipped automatically if nothing changed
     notify();
 }
 
@@ -225,10 +249,17 @@ void SampleLibrary::setDelay (int slot, float ms, bool commit)
     if (slot < 0 || slot >= numLoaded)
         return;
 
+    if (! dragBefore)                    // first step of a drag: remember the state to undo to
+        dragBefore = makeSnapshot();
+
     slots[(size_t) slot]->delayMs.store (juce::jlimit (0.0f, SampleData::kMaxDelayMs, ms), std::memory_order_relaxed);
 
     if (commit)
+    {
+        auto before = std::move (*dragBefore);
+        pushHistory (std::move (before));
         notify();
+    }
 }
 
 void SampleLibrary::setSelected (int slot)
@@ -388,6 +419,12 @@ void SampleLibrary::handleAsyncUpdate()
         }
     }
 
+    if (pending.empty() && importBefore)
+    {
+        pushHistory (std::move (*importBefore));
+        importBefore.reset();
+    }
+
     if (pending.empty() && selected.load() >= numLoaded)
     {
         selected.store (juce::jmax (0, numLoaded - 1));
@@ -423,4 +460,168 @@ void SampleLibrary::timerCallback()
 
     if (retired.empty())
         stopTimer();
+}
+
+// ---- undo / redo ------------------------------------------------------------------
+SampleLibrary::Snapshot SampleLibrary::makeSnapshot() const
+{
+    Snapshot s;
+    s.selected = selected.load();
+    s.entries.reserve ((size_t) numLoaded);
+
+    for (int i = 0; i < numLoaded; ++i)
+    {
+        Entry e;
+        e.sample = slots[(size_t) i];
+        e.sample->getRegion (e.start, e.end);
+        e.delayMs = e.sample->delayMs.load();
+        s.entries.push_back (std::move (e));
+    }
+
+    return s;
+}
+
+bool SampleLibrary::sameContent (const Snapshot& a, const Snapshot& b) noexcept
+{
+    if (a.entries.size() != b.entries.size())
+        return false;
+
+    for (size_t i = 0; i < a.entries.size(); ++i)
+    {
+        const auto &x = a.entries[i], &y = b.entries[i];
+
+        if (x.sample != y.sample || x.start != y.start || x.end != y.end || std::abs (x.delayMs - y.delayMs) > 0.01f)
+            return false;
+    }
+
+    return true;
+}
+
+void SampleLibrary::pushHistory (Snapshot before)
+{
+    perf::ScopedTimer timer (perfMon, perf::Id::HistoryOp);
+
+    dragBefore.reset();
+
+    if (sameContent (before, makeSnapshot()))
+        return;                                   // nothing actually changed
+
+    undoStack.push_back (std::move (before));
+    redoStack.clear();
+    trimHistory();
+}
+
+void SampleLibrary::trimHistory()
+{
+    while (undoStack.size() > kMaxHistorySteps)
+        undoStack.pop_front();
+
+    // Audio that only history still holds (removed files) must stay under a memory budget.
+    while (! undoStack.empty())
+    {
+        std::vector<const SampleData*> seen;
+        size_t bytes = 0;
+
+        auto count = [&] (const Snapshot& s)
+        {
+            for (const auto& e : s.entries)
+            {
+                const SampleData* p = e.sample.get();
+                bool loaded = false;
+
+                for (int i = 0; i < numLoaded && ! loaded; ++i)
+                    loaded = slots[(size_t) i].get() == p;
+
+                if (! loaded && std::find (seen.begin(), seen.end(), p) == seen.end())
+                {
+                    seen.push_back (p);
+                    bytes += p->getMemoryBytes();
+                }
+            }
+        };
+
+        for (const auto& s : undoStack) count (s);
+        for (const auto& s : redoStack) count (s);
+
+        if (bytes <= kMaxHistoryBytes)
+            break;
+
+        undoStack.pop_front();
+    }
+}
+
+void SampleLibrary::clearHistory()
+{
+    undoStack.clear();
+    redoStack.clear();
+    dragBefore.reset();
+}
+
+// Makes `s` the library's content. Samples that leave are unpublished and retired (kept alive until
+// the audio thread cannot touch them); samples that come back are published again.
+void SampleLibrary::applySnapshot (const Snapshot& s)
+{
+    for (int i = 0; i < numLoaded; ++i)
+    {
+        const auto& cur = slots[(size_t) i];
+        const bool stays = std::any_of (s.entries.begin(), s.entries.end(),
+                                        [&] (const Entry& e) { return e.sample == cur; });
+        if (! stays)
+        {
+            cur->removed.store (true, std::memory_order_release);
+            retire (cur);
+        }
+    }
+
+    for (size_t i = 0; i < s.entries.size(); ++i)
+    {
+        const auto& e = s.entries[i];
+        e.sample->removed.store (false, std::memory_order_release);
+        e.sample->setRegion (e.start, e.end);
+        e.sample->delayMs.store (e.delayMs);
+        slots[i] = e.sample;
+        audioSlots[i].store (e.sample.get(), std::memory_order_release);
+    }
+
+    for (size_t i = s.entries.size(); i < (size_t) kMaxSamples; ++i)
+    {
+        slots[i] = nullptr;
+        audioSlots[i].store (nullptr, std::memory_order_release);
+    }
+
+    numLoaded = (int) s.entries.size();
+    selected.store (juce::jlimit (0, juce::jmax (0, numLoaded - 1), s.selected));
+    statusMessage = {};
+}
+
+void SampleLibrary::undo()
+{
+    if (undoStack.empty())
+        return;
+
+    perf::ScopedTimer timer (perfMon, perf::Id::HistoryOp);
+
+    auto current = makeSnapshot();
+    auto target = std::move (undoStack.back());
+    undoStack.pop_back();
+    redoStack.push_back (std::move (current));
+    applySnapshot (target);
+    trimHistory();
+    notify();
+}
+
+void SampleLibrary::redo()
+{
+    if (redoStack.empty())
+        return;
+
+    perf::ScopedTimer timer (perfMon, perf::Id::HistoryOp);
+
+    auto current = makeSnapshot();
+    auto target = std::move (redoStack.back());
+    redoStack.pop_back();
+    undoStack.push_back (std::move (current));
+    applySnapshot (target);
+    trimHistory();
+    notify();
 }

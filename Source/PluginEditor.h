@@ -24,6 +24,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;     // Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo
 
     // The whole window accepts dropped files.
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -42,6 +43,8 @@ private:
 
     SamplerLookAndFeel lookAndFeel;
     juce::ComboBox fileBox;
+    juce::TextButton undoButton { "Undo" };
+    juce::TextButton redoButton { "Redo" };
     juce::TextButton playButton { "Play" };
     juce::TextButton clearButton { "Clear" };
     juce::TextButton perfButton { "Perf" };

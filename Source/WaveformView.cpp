@@ -14,6 +14,8 @@ void WaveformView::setSample (std::shared_ptr<const SampleData> newSample)
         return;
 
     sample = std::move (newSample);
+    viewStart = 0.0;                                            // a new file starts fully zoomed out
+    viewLen = sample != nullptr ? (double) sample->numFrames : 0.0;
 
     if (sample != nullptr)
         info = sample->name + "   |   " + juce::String (sample->getDurationSeconds(), 2) + " s   |   "
@@ -51,7 +53,34 @@ void WaveformView::rebuildPath()
     path.clear();
 
     if (sample != nullptr)
-        waveform::buildOutline (*sample, waveArea, path, columnTop, columnBottom);
+        waveform::buildOutline (*sample, viewStart, juce::jmin (sample->numFrames, (int) std::ceil (viewStart + viewLen)),
+                                viewLen / juce::jmax (1.0, (double) waveArea.getWidth()), waveArea, path, columnTop, columnBottom);
+}
+
+void WaveformView::setView (double start, double length)
+{
+    if (sample == nullptr)
+        return;
+
+    const double n = (double) sample->numFrames;
+    length = juce::jlimit (juce::jmin (n, 64.0), n, length);
+    start = juce::jlimit (0.0, n - length, start);
+
+    if (std::abs (start - viewStart) < 1.0e-6 && std::abs (length - viewLen) < 1.0e-6)
+        return;
+
+    viewStart = start;
+    viewLen = length;
+    rebuildPath();
+    repaint();
+}
+
+void WaveformView::zoomAt (double anchorFraction, double factor)
+{
+    const double anchor = viewStart + anchorFraction * viewLen;
+    const double newLen = viewLen * factor;
+    setView (anchor - anchorFraction * juce::jlimit (juce::jmin (64.0, viewLen), (double) sample->numFrames, newLen),
+             newLen);
 }
 
 void WaveformView::paint (juce::Graphics& g)

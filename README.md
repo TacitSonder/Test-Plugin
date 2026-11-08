@@ -11,6 +11,14 @@ dropdown, optionally select part of it, and any MIDI note (or the Play button) p
 * **Select a part of the file:** drag on the waveform. Drag either edge to adjust it,
   double-click to go back to the whole file. Only the selected part plays; the cut points get a
   ~1.3 ms fade so they never click. Each file remembers its own selection.
+* **Zoom the waveform editor:** mouse wheel zooms around the pointer; shift + wheel (or a sideways
+  wheel) pans; right-click for "Zoom to selection", "Zoom to fit", "Select whole file". A bar along
+  the bottom shows which part of the file you are viewing.
+* **Move the selection:** drag inside the selected area. Drag its edges to resize it.
+* **Undo / Redo** (buttons, Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z): importing files (one drop = one step),
+  Clear, removing a file, selection edits and delay drags. Removed files come back instantly (their
+  audio is kept in memory, no re-loading). History keeps the last 40 steps and at most 512 MB of
+  removed audio; loading a project starts with an empty history.
 * **Timeline (lower panel):** shows the selected part on a time axis in ms (0 = the moment you
   trigger). **SCALE** sets how much time the panel spans, 100 to 5000 ms. The **handle** under the
   waveform delays the sound: drag it (or click the track) and the waveform slides along the ruler;

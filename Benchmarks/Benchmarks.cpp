@@ -236,6 +236,33 @@ int main()
         }
     }
 
+    if (loadOne (lib, file48))                       // waveform editor zoom: the three regimes
+    {
+        const auto sample = lib.getSample (0);
+        juce::Path path; std::vector<float> a, b;
+        const juce::Rectangle<float> area (0.0f, 0.0f, 1200.0f, 300.0f);
+        const double n = (double) sample->numFrames;
+        struct Case { const char* name; double len; };
+        for (const Case c : { Case { "fully zoomed out (peaks)", n }, Case { "zoomed to 2 s (raw audio)", 96000.0 }, Case { "zoomed to 20 ms (raw audio)", 960.0 } })
+        {
+            auto t = measure (9, 200, [] {}, [&] { const double first = c.len >= n ? 0.0 : n * 0.3;
+                waveform::buildOutline (*sample, first, (int) (first + c.len), c.len / 1200.0, area, path, a, b); });
+            addAbsRow (juce::String ("ui: waveform editor outline, ") + c.name + ", 1200 px", t, 3000.0,
+                       c.len == n ? "runs on every wheel step" : "");
+        }
+    }
+
+    {   // undo history: record + undo + redo with 8 files loaded
+        lib.clear();
+        lib.clearHistory();
+        juce::StringArray eight; for (int i = 0; i < 8; ++i) eight.add (file48.getFullPathName());
+        lib.addFiles (eight);
+        for (int t = 0; t < 20000 && lib.getNumLoaded() < 8; t += 2) juce::MessageManager::getInstance()->runDispatchLoopUntil (2);
+        int flip = 0;
+        auto t = measure (9, 200, [] {}, [&] { lib.setRegion (3, 1000 + (++flip % 7) * 100, 90000); lib.undo(); lib.redo(); });
+        addAbsRow ("library: record + undo + redo (8 files loaded)", t, 500.0, "message thread, once per user action");
+    }
+
     // ------------------------------------------------------ profiler overhead
     {
         const int N = 20000;
