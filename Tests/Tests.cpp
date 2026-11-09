@@ -568,7 +568,32 @@ int main()
         lp.speed.setEnvelope (mod::Envelope::flat (0.75f));
         CHECK (std::abs (lp.speed.readTable().at (0.5) - 2.0f) < 1e-5f, "published table holds real speed values");
         lp.level.setKnob (7.0f); lp.speed.setKnob (0.0f);
-        CHECK (lp.level.getKnob() == 1.0f && lp.speed.getKnob() == 0.25f, "knobs are clamped to their range");
+        CHECK (lp.level.getKnob() == 0.0f && lp.speed.getKnob() == 0.25f, "knobs are clamped to their range");
+        lp.level.setKnob (-99.0f);
+        CHECK (lp.level.getKnob() == -60.0f && lp.level.getAudioValue() == 0.0f, "level: the bottom of the range is silence");
+        lp.level.setKnob (0.0f);
+        CHECK (lp.level.getAudioValue() == 1.0f, "level: 0 dB is unity gain");
+        lp.level.setKnob (-6.0206f);
+        CHECK (std::abs (lp.level.getAudioValue() - 0.5f) < 1e-4f, "level: -6 dB is half the amplitude");
+        CHECK (std::abs (lp.level.unitsFromNorm (0.5) + 30.0f) < 1e-4f && std::abs (lp.level.toNorm (-15.0f) - 0.75) < 1e-9
+               && lp.level.fromNorm (1.0) == 1.0f && lp.level.fromNorm (0.0) == 0.0f && std::abs (lp.level.fromNorm (0.5) - 0.0316228f) < 1e-5f,
+               "level envelope axis: 0..1 maps to silence..-60 dB..0 dB");
+
+        float lo = 0.0f, hi = 1.0f;
+        mod::zoomRange (lo, hi, 0.5f, 0.5f);
+        CHECK (std::abs (lo - 0.25f) < 1e-6f && std::abs (hi - 0.75f) < 1e-6f, "zoom in around the middle");
+        mod::zoomRange (lo, hi, 0.0f, 0.5f);
+        CHECK (std::abs (lo - 0.25f) < 1e-6f && std::abs (hi - 0.5f) < 1e-6f, "zoom keeps the anchor point fixed");
+        for (int i = 0; i < 30; ++i) mod::zoomRange (lo, hi, 0.5f, 0.5f);
+        CHECK (std::abs ((hi - lo) - 0.02f) < 1e-6f, "zoom stops at the minimum range");
+        for (int i = 0; i < 30; ++i) mod::zoomRange (lo, hi, 0.5f, 2.0f);
+        CHECK (lo == 0.0f && hi == 1.0f, "zooming out returns to the full range");
+        lo = 0.2f; hi = 0.4f; mod::panRange (lo, hi, 5.0f);
+        CHECK (std::abs (hi - 1.0f) < 1e-6f && std::abs ((hi - lo) - 0.2f) < 1e-6f, "pan stops at the edge, keeping the width");
+
+        lp.speed.setEnvelope (mod::Envelope::flat (0.1f)); lp.level.setEnvelope (mod::Envelope::flat (0.1f));
+        const auto ds = lp.speed.getDefaultEnvelope(), dl = lp.level.getDefaultEnvelope();
+        CHECK (ds.count == 5 && ds.pts[2].y == 0.5f && dl.count == 5 && dl.valueAt (0.0f) == 1.0f && dl.valueAt (1.0f) == 0.0f, "default envelopes: speed flat at x1, level gate");
 
         // one writer, one reader, nothing ever torn
         mod::TripleBuffer<mod::EnvTable> tb; tb.fillAll ({});
@@ -599,30 +624,30 @@ int main()
         tail = true; for (int i = 10002; i < 12288; ++i) tail &= (o.L[(size_t) i] == 0.0f);
         CHECK (err < 1e-4 && tail, "speed x0.5: interpolated, twice as long");
 
-        lp.speed.setKnob (1.0f); lp.level.setKnob (0.5f);
+        lp.speed.setKnob (1.0f); lp.level.setKnob (-6.0206f);
         o = play();
         err = 0; for (int i = 0; i < 5000; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - 0.5f * genL (i)));
         CHECK (err < 1e-5, "level 0.5 halves the output");
 
         // moving the knob is smoothed over the block (no zipper noise)
-        lp.level.setKnob (1.0f);
+        lp.level.setKnob (0.0f);
         eng.prepare (48000.0);
         juce::AudioBuffer<float> buf (2, 512); juce::MidiBuffer none, on; on.addEvent (noteOn (60, 127), 0);
         eng.process (buf, on);
-        lp.level.setKnob (0.5f);
+        lp.level.setKnob (-6.0206f);
         eng.process (buf, none);
         err = 0; for (int k = 0; k < 512; ++k) err = juce::jmax (err, (double) std::abs (buf.getSample (0, k) - (1.0f - 0.5f * (float) k / 512.0f) * genL (512 + k)));
         CHECK (err < 1e-5, "level change ramps linearly across the block");
         eng.process (buf, none);
         CHECK (std::abs (buf.getSample (0, 5) - 0.5f * genL (1024 + 5)) < 1e-5f, "then holds the new level");
 
-        // level envelope: straight line 1 -> 0 over the sound
-        lp.level.setKnob (1.0f);
+        // level envelope: a straight line in dB from 0 dB to silence over the sound
+        lp.level.setKnob (0.0f);
         mod::Envelope down; down.count = 2; down.pts[0] = { 0.0f, 1.0f }; down.pts[1] = { 1.0f, 0.0f };
         lp.level.setEnvelope (down); lp.level.setEnvelopeMode (true);
         o = play();
-        err = 0; for (int i = 0; i < 4990; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - (1.0 - (double) i / 5000.0) * genL (i)));
-        CHECK (err < 5e-4, "level envelope follows the sound position");
+        err = 0; for (int i = 0; i < 4990; ++i) err = juce::jmax (err, (double) std::abs (o.L[(size_t) i] - std::pow (10.0, -3.0 * (double) i / 5000.0) * genL (i)));
+        CHECK (err < 5e-4, "level envelope follows the sound position, linear in dB");
         lp.level.setEnvelopeMode (false);
 
         // speed envelope: flat at x1 changes nothing, flat at x2 equals the x2 knob
@@ -656,7 +681,7 @@ int main()
             p.getLibrary().setDelay (1, 250.0f, true);
             p.setScaleMs (2500);
             p.getLayer().speed.setKnob (1.5f);
-            p.getLayer().level.setKnob (0.67f);
+            p.getLayer().level.setKnob (-3.5f);
             { mod::Envelope e = mod::Envelope::flat (0.5f); e.addPoint (0.4f, 0.9f); p.getLayer().speed.setEnvelope (e); p.getLayer().speed.setEnvelopeMode (true); }
             p.setEditorSize (900, 500);
             p.getStateInformation (state);
@@ -673,7 +698,7 @@ int main()
         CHECK (p2.getLibrary().getSample (1)->delayMs.load() == 250.0f && p2.getLibrary().getSample (0)->delayMs.load() == 0.0f, "per-file delay restored");
         CHECK (p2.getScaleMs() == 2500, "timeline scale restored");
         const auto e2 = p2.getLayer().speed.getEnvelope();
-        CHECK (std::abs (p2.getLayer().speed.getKnob() - 1.5f) < 1e-6f && std::abs (p2.getLayer().level.getKnob() - 0.67f) < 1e-6f, "speed and level knobs restored");
+        CHECK (std::abs (p2.getLayer().speed.getKnob() - 1.5f) < 1e-6f && std::abs (p2.getLayer().level.getKnob() + 3.5f) < 1e-6f, "speed and level knobs restored");
         CHECK (p2.getLayer().speed.isEnvelopeMode() && ! p2.getLayer().level.isEnvelopeMode() && e2.count == 6 && std::abs (e2.pts[2].y - 0.9f) < 1e-6f, "envelope mode and points restored");
 
         p2.setPlayConfigDetails (0, 2, 48000.0, 256);

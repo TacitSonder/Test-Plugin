@@ -20,12 +20,16 @@ dropdown, optionally select part of it, and any MIDI note (or the Play button) p
   audio is kept in memory, no re-loading). History keeps the last 40 steps and at most 512 MB of
   removed audio; loading a project starts with an empty history.
 * **SPEED and LEVEL (right of the waveform):** SPEED is the playback rate, x0.25 to x4 (logarithmic,
-  x1 in the middle; it changes pitch and length). LEVEL is the volume, 0 to 1. Both apply live and knob
+  x1 in the middle; it changes pitch and length). LEVEL is the volume in dB, -60 to 0 (0 dB = unchanged, the bottom of the range is silence). Both apply live and knob
   moves are smoothed. Double-click a knob to reset it. Flip **ENV / KNOB** under a control to replace the
   knob with an envelope: click empty space to add a point (up to 8), drag points, double-click a point to
   remove it. The envelope plays over the length of the selected part of the file (left = start of the
-  selection, right = its end). The first and last points only move up and down. The default LEVEL
+  selection, right = its end). The first and last points only move up and down. The LEVEL envelope axis is dB too (bottom = silence, top = 0 dB), so its slopes are fades that are even to the ear. The default LEVEL
   envelope is a gate (instant start, hold, drop at the end); drag its second point to make an attack.
+  **Zoom the envelope:** wheel = zoom time, Ctrl + wheel = zoom value, Shift + wheel = pan time,
+  Alt + wheel = pan value (axis labels appear when zoomed; while dragging a point you see its exact
+  values). **Right-click** the envelope for *Reset envelope* (back to flat x1 for SPEED, the gate for
+  LEVEL), *Undo reset* (available right after a reset) and *Reset zoom*.
 * **Timeline (lower panel):** shows the selected part on a time axis in ms (0 = the moment you
   trigger). **SCALE** sets how much time the panel spans, 100 to 5000 ms. The **handle** under the
   waveform delays the sound: drag it (or click the track) and the waveform slides along the ruler;

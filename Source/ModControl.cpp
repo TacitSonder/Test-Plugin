@@ -37,7 +37,12 @@ ModControl::ModControl (const juce::String& t, ModParam& p, perf::Monitor& pm) :
     knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     knob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
     knob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    knob.textFromValueFunction = [] (double v) { return juce::String (v, 2); };
+    const bool isLevel = param.getKind() == ModParam::Kind::Level;
+    const double lowest = (double) param.getMin();
+    knob.textFromValueFunction = [isLevel, lowest] (double v)               // level in dB, "-inf" at the bottom
+    {
+        return isLevel ? (v <= lowest + 1.0e-3 ? juce::String ("-inf") : juce::String (v, 1) + " dB") : juce::String (v, 2);
+    };
 
     if (param.getKind() == ModParam::Kind::Speed)            // logarithmic: x1 in the middle, x0.5 and x2 equally far from it
         knob.setNormalisableRange (juce::NormalisableRange<double> (
@@ -45,13 +50,21 @@ ModControl::ModControl (const juce::String& t, ModParam& p, perf::Monitor& pm) :
             [] (double s, double e, double n) { return s * std::pow (e / s, n); },
             [] (double s, double e, double v) { return std::log (v / s) / std::log (e / s); }));
     else
-        knob.setRange ((double) param.getMin(), (double) param.getMax());
+        knob.setRange ((double) param.getMin(), (double) param.getMax(), 0.1);      // dB in 0.1 steps
 
     knob.setDoubleClickReturnValue (true, (double) param.getDefault());
     knob.onValueChange = [this] { param.setKnob ((float) knob.getValue()); };
     addAndMakeVisible (knob);
 
     editor.onChanged = [this] (const mod::Envelope& e) { param.setEnvelope (e); };
+    editor.defaultEnvelope = [this] { return param.getDefaultEnvelope(); };
+    editor.yLabel = [this] (float n)
+    {
+        const float u = param.unitsFromNorm ((double) n);
+        if (param.getKind() == ModParam::Kind::Speed)
+            return "x" + juce::String (u, 2);
+        return u <= param.getMin() + 1.0e-3f ? juce::String ("-inf") : juce::String (u, 1) + " dB";
+    };
     addChildComponent (editor);
 
     modeSwitch.onChange = [this] (bool env) { param.setEnvelopeMode (env); applyMode (env); };

@@ -2,19 +2,35 @@
 
 ModParam::ModParam (Kind k, perf::Monitor& pm) : kind (k), perfMon (pm)
 {
+    setKnob (getDefault());
     table.fillAll ({});
-    setEnvelope (kind == Kind::Speed ? mod::Envelope::flat ((float) toNorm (1.0f)) : mod::Envelope::gate());
+    setEnvelope (getDefaultEnvelope());
 }
 
-float ModParam::fromNorm (double p) const noexcept
+float ModParam::unitsFromNorm (double p) const noexcept
 {
     p = juce::jlimit (0.0, 1.0, p);
-    return kind == Kind::Speed ? (float) (0.25 * std::pow (16.0, p)) : (float) p;     // speed: logarithmic, 1.0 in the middle
+    return kind == Kind::Speed ? (float) (0.25 * std::pow (16.0, p))     // speed: logarithmic, x1 in the middle
+                               : (float) (-60.0 + 60.0 * p);             // level: linear in dB
 }
 
-double ModParam::toNorm (float v) const noexcept
+double ModParam::toNorm (float units) const noexcept
 {
-    return kind == Kind::Speed ? std::log ((double) v / 0.25) / std::log (16.0) : (double) v;
+    return kind == Kind::Speed ? std::log ((double) units / 0.25) / std::log (16.0)
+                               : ((double) units + 60.0) / 60.0;
+}
+
+float ModParam::toAudio (float units) const noexcept
+{
+    if (kind == Kind::Speed)
+        return units;
+
+    return units <= getMin() + 1.0e-4f ? 0.0f : std::pow (10.0f, units * 0.05f);     // bottom of the range = silence
+}
+
+mod::Envelope ModParam::getDefaultEnvelope() const
+{
+    return kind == Kind::Speed ? mod::Envelope::flat ((float) toNorm (1.0f)) : mod::Envelope::gate();
 }
 
 mod::Envelope ModParam::getEnvelope() const

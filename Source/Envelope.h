@@ -97,6 +97,23 @@ namespace mod
         }
     };
 
+    // View helpers for the editor: zoom a [lo, hi] window of 0..1 around a point of the window
+    // (frac 0..1), or slide it. The window always stays inside 0..1 and is at least minRange wide.
+    inline void zoomRange (float& lo, float& hi, float frac, float factor, float minRange = 0.02f) noexcept
+    {
+        const float range = hi - lo;
+        const float newRange = juce::jlimit (minRange, 1.0f, range * factor);
+        lo = juce::jlimit (0.0f, 1.0f - newRange, lo + frac * range - frac * newRange);
+        hi = lo + newRange;
+    }
+
+    inline void panRange (float& lo, float& hi, float delta) noexcept
+    {
+        const float range = hi - lo;
+        lo = juce::jlimit (0.0f, 1.0f - range, lo + delta);
+        hi = lo + range;
+    }
+
     // The envelope sampled at kTableSize + 1 positions, in real parameter values.
     // The audio thread only ever does a linear lookup in this.
     struct EnvTable

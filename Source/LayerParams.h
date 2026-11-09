@@ -15,19 +15,31 @@ public:
     ModParam (Kind, perf::Monitor&);
 
     Kind getKind() const noexcept         { return kind; }
-    float getMin() const noexcept         { return kind == Kind::Speed ? 0.25f : 0.0f; }     // speed: x0.25 .. x4
-    float getMax() const noexcept         { return kind == Kind::Speed ? 4.0f : 1.0f; }     // level: 0 .. 1
-    float getDefault() const noexcept     { return 1.0f; }
-    float fromNorm (double p) const noexcept;                                               // envelope height 0..1 -> value
-    double toNorm (float value) const noexcept;
+    // The knob and the envelope axis work in "units": speed as a ratio (x0.25 .. x4, logarithmic) and
+    // level in dB (-60 .. 0, linear in dB; the bottom of the range is silence). The audio thread only
+    // ever sees the converted value: the speed ratio or a linear gain.
+    float getMin() const noexcept         { return kind == Kind::Speed ? 0.25f : -60.0f; }
+    float getMax() const noexcept         { return kind == Kind::Speed ? 4.0f : 0.0f; }
+    float getDefault() const noexcept     { return kind == Kind::Speed ? 1.0f : 0.0f; }
+    float unitsFromNorm (double p) const noexcept;                                          // envelope height 0..1 -> units
+    double toNorm (float units) const noexcept;
+    float toAudio (float units) const noexcept;                                             // units -> speed ratio / linear gain
+    float fromNorm (double p) const noexcept { return toAudio (unitsFromNorm (p)); }        // envelope height -> audio value
 
     // knob and mode: single atomics, readable from any thread
-    float getKnob() const noexcept        { return knob.load (std::memory_order_relaxed); }
-    void setKnob (float v) noexcept       { knob.store (juce::jlimit (getMin(), getMax(), v), std::memory_order_relaxed); }
+    float getKnob() const noexcept        { return knob.load (std::memory_order_relaxed); }                // in units
+    float getAudioValue() const noexcept  { return audioValue.load (std::memory_order_relaxed); }          // what the engine uses
+    void setKnob (float units) noexcept
+    {
+        units = juce::jlimit (getMin(), getMax(), units);
+        knob.store (units, std::memory_order_relaxed);
+        audioValue.store (toAudio (units), std::memory_order_relaxed);
+    }
     bool isEnvelopeMode() const noexcept  { return envelopeMode.load (std::memory_order_relaxed); }
     void setEnvelopeMode (bool b) noexcept { envelopeMode.store (b, std::memory_order_relaxed); }
 
     // envelope: edited on the message thread; rebuilds the table and publishes it lock-free
+    mod::Envelope getDefaultEnvelope() const;               // flat at x1 (speed) / gate (level)
     mod::Envelope getEnvelope() const;
     void setEnvelope (const mod::Envelope&);
 
@@ -37,7 +49,7 @@ public:
 private:
     Kind kind;
     perf::Monitor& perfMon;
-    std::atomic<float> knob { 1.0f };
+    std::atomic<float> knob { 1.0f }, audioValue { 1.0f };
     std::atomic<bool> envelopeMode { false };
     mutable juce::CriticalSection lock;                 // message-thread side only (never taken by the audio thread)
     mod::Envelope envelope;
