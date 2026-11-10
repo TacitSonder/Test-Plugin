@@ -51,8 +51,9 @@ void SamplerLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
 
     g.setColour (theme::subtle);                                                // value in the middle
     g.setFont (juce::FontOptions (juce::jlimit (11.0f, 22.0f, radius * 0.36f)));
-    g.drawText (slider.getTextFromValue (slider.getValue()),
-                juce::Rectangle<float> (radius * 1.3f, radius * 0.6f).withCentre (centre), juce::Justification::centred, false);
+    g.drawFittedText (slider.getTextFromValue (slider.getValue()),
+                      juce::Rectangle<float> (radius * 1.3f, radius * 0.6f).withCentre (centre).toNearestInt(),
+                      juce::Justification::centred, 1, 0.6f);
 }
 
 // -----------------------------------------------------------------------------

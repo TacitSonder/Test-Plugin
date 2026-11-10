@@ -44,7 +44,7 @@ void SamplerEngine::prepare (double sampleRate) noexcept
 {
     hostSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     reset();
-    levelPrev = params.level.getKnob();                                  // no ramp on the first block
+    levelPrev = params.level.getAudioValue();                                  // no ramp on the first block
     lastTriggerCount = triggerCount.load (std::memory_order_acquire);   // ignore clicks from before
 }
 
@@ -262,10 +262,10 @@ void SamplerEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiB
     dropStaleVoices();
 
     // The layer's parameters, read once for the whole block.
-    bm.speedKnob  = (double) params.speed.getKnob();
+    bm.speedKnob  = (double) params.speed.getAudioValue();
     bm.speedTable = params.speed.isEnvelopeMode() ? &params.speed.readTable() : nullptr;
     bm.levelTable = params.level.isEnvelopeMode() ? &params.level.readTable() : nullptr;
-    const float levelNow = params.level.getKnob();
+    const float levelNow = params.level.getAudioValue();
     bm.levelSlope = (levelNow - levelPrev) / (float) numSamples;      // knob moves are smoothed across the block
 
     float* const left  = buffer.getWritePointer (0);
