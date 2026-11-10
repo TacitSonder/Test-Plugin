@@ -64,6 +64,26 @@ static Out run (SamplerEngine& eng, int total, int block, const std::function<vo
     return o;
 }
 
+// Printed only when a value check fails: what was measured, so a failure on another machine explains itself.
+static void diag (const char* what, const std::vector<float>& got, int offset, const std::function<float (int)>& expected, int count)
+{
+    double maxErr = 0.0; int worst = -1, nonZero = 0; float peak = 0.0f;
+    for (int k = 0; k < count; ++k)
+    {
+        const float g = got[(size_t) (offset + k)];
+        if (g != 0.0f) ++nonZero;
+        peak = juce::jmax (peak, std::abs (g));
+        const double e = std::abs ((double) g - (double) expected (k));
+        if (e > maxErr) { maxErr = e; worst = k; }
+    }
+    std::printf ("    DIAG %s: maxErr=%.3g  nonZero=%d/%d  peak=%.5f", what, maxErr, nonZero, count, (double) peak);
+    if (worst >= 0) std::printf ("  worst at k=%d got=%.7f expected=%.7f", worst, (double) got[(size_t) (offset + worst)], (double) expected (worst));
+    std::printf ("\n    DIAG first values (got / expected):");
+    for (int k = 0; k < 4 && k < count; ++k)
+        std::printf ("  %.6f / %.6f", (double) got[(size_t) (offset + k)], (double) expected (k));
+    std::printf ("\n");
+}
+
 static bool loadAll (SampleLibrary& lib, const juce::StringArray& files)
 {
     lib.addFiles (files);
@@ -116,6 +136,24 @@ int main()
         CHECK (s == 200 && e == 300, "region round trip");
         d.setRegion (900, 5000); d.getRegion (s, e);
         CHECK (s == 900 && e == 1000, "region end clamped to file");
+    }
+
+    // -------------------------------------------------------- file round trip
+    std::printf ("[wav] loaded audio equals what was written\n");
+    {
+        perf::Monitor pm; SampleLibrary lib (pm);
+        CHECK (loadAll (lib, { p3 }), "loaded");
+        const auto s = lib.getSample (0);
+        double ioErr = 0.0; int worst = 0;
+        for (int i = 0; i < 5000; ++i)
+        {
+            const double e = std::abs ((double) s->audio.getSample (0, i) - (double) genL (i));
+            if (e > ioErr) { ioErr = e; worst = i; }
+        }
+        if (ioErr >= 1.0e-6)
+            std::printf ("    DIAG file: maxErr=%.3g at frame %d: got %.7f expected %.7f  (rate %.1f, %d ch, %d frames)\n", ioErr, worst,
+                         (double) s->audio.getSample (0, worst), (double) genL (worst), s->sampleRate, s->numChannels, s->numFrames);
+        CHECK (ioErr < 1.0e-6 && s->numFrames == 5000 && s->numChannels == 2 && s->sampleRate == 48000.0, "decoded audio matches the generated signal");
     }
 
     // ------------------------------------------------------------------ library
@@ -192,6 +230,14 @@ int main()
         }
         for (int i = 5100; i < 6144; ++i) silentAfter &= (o.L[(size_t) i] == 0.0f && o.R[(size_t) i] == 0.0f);
         CHECK (silentBefore, "silence before the note (sample-accurate start)");
+        if (maxErr >= 1.0e-5)
+        {
+            diag ("unity left ", o.L, 100, [g] (int k) { return g * genL (k); }, 5000);
+            std::printf ("    DIAG params: speed=%.4f (audio %.4f, env %d)  level=%.4f (audio %.4f, env %d)  selected=%d  sample=%s  voices=%d\n",
+                         (double) lp.speed.getKnob(), (double) lp.speed.getAudioValue(), (int) lp.speed.isEnvelopeMode(),
+                         (double) lp.level.getKnob(), (double) lp.level.getAudioValue(), (int) lp.level.isEnvelopeMode(),
+                         lib.getSelected(), lib.getSample (lib.getSelected())->name.toRawUTF8(), eng.getNumActiveVoices());
+        }
         CHECK (maxErr < 1.0e-5, "output equals file * velocity gain");
         CHECK (silentAfter && eng.getNumActiveVoices() == 0, "silence and voice freed after the end");
     }
