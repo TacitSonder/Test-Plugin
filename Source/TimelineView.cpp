@@ -5,33 +5,56 @@
 TimelineView::TimelineView (perf::Monitor& pm) : perfMon (pm)
 {
     setOpaque (true);
+
+    for (int i = 0; i < layercfg::kCount; ++i)
+    {
+        layers[(size_t) i].name = layercfg::kNames[i];
+        layers[(size_t) i].colour = theme::layerColour (i);
+    }
 }
 
-void TimelineView::setSample (std::shared_ptr<const SampleData> newSample)
+void TimelineView::setLayerStyle (int layer, const juce::String& name, juce::Colour colour)
 {
-    const bool sampleChanged = newSample != sample;
-    sample = std::move (newSample);
+    layers[(size_t) layer].name = name;
+    layers[(size_t) layer].colour = colour;
+    repaint();
+}
+
+void TimelineView::setSample (int layer, std::shared_ptr<const SampleData> newSample)
+{
+    auto& l = layers[(size_t) layer];
+    const bool sampleChanged = newSample != l.sample;
+    l.sample = std::move (newSample);
 
     int s = 0, e = 0;
     float d = 0.0f;
 
-    if (sample != nullptr)
+    if (l.sample != nullptr)
     {
-        sample->getRegion (s, e);
-        d = sample->delayMs.load (std::memory_order_relaxed);
+        l.sample->getRegion (s, e);
+        d = l.sample->delayMs.load (std::memory_order_relaxed);
     }
 
-    const bool regionChanged = sampleChanged || s != regionStart || e != regionEnd;
-    regionStart = s;
-    regionEnd = e;
+    const bool regionChanged = sampleChanged || s != l.regionStart || e != l.regionEnd;
+    l.regionStart = s;
+    l.regionEnd = e;
 
-    if (! dragging)
-        delayMs = d;
+    if (dragLayer != layer)                       // keep the local value while this layer's handle is being dragged
+        l.delayMs = d;
 
     if (regionChanged)
-        rebuildPath();
+        rebuildPath (l);
 
     repaint();
+}
+
+void TimelineView::setActiveLayer (int layer)
+{
+    if (layer != activeLayer)
+    {
+        activeLayer = layer;
+        repaint();
+    }
 }
 
 void TimelineView::setScaleMs (int ms)
@@ -41,7 +64,8 @@ void TimelineView::setScaleMs (int ms)
     if (ms != scaleMs)
     {
         scaleMs = ms;
-        rebuildPath();
+        for (auto& l : layers)
+            rebuildPath (l);
         repaint();
     }
 }
@@ -51,28 +75,39 @@ void TimelineView::resized()
     const float margin = (float) juce::jlimit (6, 14, juce::jmin (getWidth(), getHeight()) / 20);
     auto b = getLocalBounds().toFloat().reduced (margin);
 
-    rulerArea  = b.removeFromTop (20.0f);
-    handleArea = b.removeFromBottom (14.0f);
-    b.removeFromBottom (5.0f);
+    rulerArea = b.removeFromTop (20.0f);
+
+    for (int i = layercfg::kCount - 1; i >= 0; --i)          // handle rows at the bottom, layer 0 on top
+    {
+        rows[(size_t) i] = b.removeFromBottom (kRowHeight);
+        b.removeFromBottom (kRowGap);
+    }
+
     waveArea = b;
 
-    rebuildPath();
+    for (auto& l : layers)
+        rebuildPath (l);
 }
 
-void TimelineView::rebuildPath()
+void TimelineView::rebuildPath (LayerView& l)
 {
     perf::ScopedTimer timer (perfMon, perf::Id::TimelinePath);
 
-    path.clear();
+    l.path.clear();
 
-    if (sample != nullptr)
-        waveform::buildTimelineOutline (*sample, regionStart, regionEnd, (double) scaleMs, waveArea,
-                                        path, columnTop, columnBottom);
+    if (l.sample != nullptr)
+        waveform::buildTimelineOutline (*l.sample, l.regionStart, l.regionEnd, (double) scaleMs, waveArea,
+                                        l.path, columnTop, columnBottom);
 }
 
-float TimelineView::thumbX() const noexcept
+float TimelineView::thumbX (const LayerView& l) const noexcept
 {
-    return juce::jlimit (waveArea.getX(), waveArea.getRight() - kThumbWidth, msToX ((double) delayMs));
+    return juce::jlimit (waveArea.getX(), waveArea.getRight() - kThumbWidth, msToX ((double) l.delayMs));
+}
+
+juce::Rectangle<int> TimelineView::dirtyArea() const noexcept
+{
+    return waveArea.getUnion (rows.front()).getUnion (rows.back()).getSmallestIntegerContainer();
 }
 
 // ---- drawing ------------------------------------------------------------------
@@ -113,7 +148,7 @@ void TimelineView::paint (juce::Graphics& g)
         g.drawText ("ms", rulerArea.withLeft (rulerArea.getRight() - 26.0f), juce::Justification::centredRight, false);
     }
 
-    // waveform, shifted by the delay and clipped to its area
+    // waveforms of all layers, each shifted by its own delay; the active layer is drawn last (on top)
     {
         const juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (waveArea.getSmallestIntegerContainer());
@@ -122,91 +157,129 @@ void TimelineView::paint (juce::Graphics& g)
         g.setColour (theme::outline);
         g.fillRect (waveArea.getX(), waveArea.getCentreY(), waveArea.getWidth(), 1.0f);
 
-        if (! path.isEmpty())
+        for (int pass = 0; pass < layercfg::kCount; ++pass)
         {
-            g.setColour (theme::accent);
-            g.fillPath (path, juce::AffineTransform::translation (msToX ((double) delayMs) - waveArea.getX(), 0.0f));
+            const int i = pass == layercfg::kCount - 1 ? activeLayer : (pass >= activeLayer ? pass + 1 : pass);
+            const auto& l = layers[(size_t) i];
+
+            if (! l.path.isEmpty())
+            {
+                g.setColour (l.colour.withAlpha (i == activeLayer ? 0.95f : 0.7f));
+                g.fillPath (l.path, juce::AffineTransform::translation (msToX ((double) l.delayMs) - waveArea.getX(), 0.0f));
+            }
         }
 
         g.setColour (juce::Colours::white.withAlpha (0.9f));              // trigger moment (t = 0)
         g.fillRect (waveArea.getX(), waveArea.getY(), 1.5f, waveArea.getHeight());
+
+        // legend: a coloured chip per layer, bottom left
+        g.setFont (juce::FontOptions (11.0f));
+        for (int i = 0; i < layercfg::kCount; ++i)
+        {
+            const auto chip = juce::Rectangle<float> (waveArea.getX() + 6.0f, waveArea.getBottom() - (float) (layercfg::kCount - i) * 17.0f - 2.0f, 60.0f, 15.0f);
+            g.setColour (layers[(size_t) i].colour.withAlpha (i == activeLayer ? 1.0f : 0.75f));
+            g.fillRoundedRectangle (chip, 4.0f);
+            g.setColour (theme::textOn (layers[(size_t) i].colour));
+            g.drawText (layers[(size_t) i].name, chip, juce::Justification::centred, false);
+        }
     }
 
-    // delay handle
-    g.setColour (theme::background);
-    g.fillRoundedRectangle (handleArea, 7.0f);
-    g.setColour (theme::outline);
-    g.drawRoundedRectangle (handleArea.reduced (0.5f), 7.0f, 1.0f);
-
-    if (sample != nullptr)
+    // one delay handle per layer
+    for (int i = 0; i < layercfg::kCount; ++i)
     {
-        const float tx = thumbX();
-        g.setColour (dragging ? theme::accent : theme::accent.withAlpha (0.75f));
-        g.fillRoundedRectangle (juce::Rectangle<float> (tx, handleArea.getY(), kThumbWidth, handleArea.getHeight()).reduced (1.0f), 6.0f);
+        const auto& l = layers[(size_t) i];
+        const auto& row = rows[(size_t) i];
 
-        g.setColour (theme::subtle);
-        g.setFont (juce::FontOptions (12.0f));
-        const juce::String text ("delay " + juce::String (juce::roundToInt (delayMs)) + " ms");
-        const bool right = tx + kThumbWidth + 80.0f < handleArea.getRight();
-        g.drawText (text, juce::Rectangle<float> (right ? tx + kThumbWidth + 6.0f : tx - 86.0f, handleArea.getY(), 80.0f, handleArea.getHeight()),
-                    right ? juce::Justification::centredLeft : juce::Justification::centredRight, false);
+        g.setColour (theme::background);
+        g.fillRoundedRectangle (row, 7.0f);
+        g.setColour (theme::outline);
+        g.drawRoundedRectangle (row.reduced (0.5f), 7.0f, 1.0f);
+
+        if (l.sample != nullptr)
+        {
+            const float tx = thumbX (l);
+            g.setColour (dragLayer == i || i == activeLayer ? l.colour : l.colour.withAlpha (0.7f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (tx, row.getY(), kThumbWidth, row.getHeight()).reduced (1.0f), 6.0f);
+
+            g.setColour (theme::subtle);
+            g.setFont (juce::FontOptions (12.0f));
+            const juce::String text (l.name + "  delay " + juce::String (juce::roundToInt (l.delayMs)) + " ms");
+            const bool right = tx + kThumbWidth + 150.0f < row.getRight();
+            g.drawText (text, juce::Rectangle<float> (right ? tx + kThumbWidth + 6.0f : tx - 156.0f, row.getY(), 150.0f, row.getHeight()),
+                        right ? juce::Justification::centredLeft : juce::Justification::centredRight, false);
+        }
     }
 }
 
 // ---- mouse --------------------------------------------------------------------
+int TimelineView::rowAt (juce::Point<float> p) const noexcept
+{
+    for (int i = 0; i < layercfg::kCount; ++i)
+        if (layers[(size_t) i].sample != nullptr && rows[(size_t) i].expanded (0.0f, 2.0f).contains (p))
+            return i;
+
+    return -1;
+}
+
 void TimelineView::dragTo (float mouseX)
 {
+    auto& l = layers[(size_t) dragLayer];
     const double maxMs = juce::jmin ((double) SampleData::kMaxDelayMs,
                                      (double) scaleMs * (1.0 - (double) kThumbWidth / (double) waveArea.getWidth()));
     const double ms = (double) (mouseX - grabOffset - waveArea.getX()) / (double) waveArea.getWidth() * (double) scaleMs;
     const float rounded = (float) juce::roundToInt (juce::jlimit (0.0, juce::jmax (0.0, maxMs), ms));
 
-    if (std::abs (rounded - delayMs) > 0.5f)       // delay is whole milliseconds
+    if (std::abs (rounded - l.delayMs) > 0.5f)       // delay is whole milliseconds
     {
-        delayMs = rounded;
-        repaint (waveArea.getUnion (handleArea).getSmallestIntegerContainer());
+        l.delayMs = rounded;
+        repaint (dirtyArea());
 
         if (onDelayChanged)
-            onDelayChanged (delayMs, false);
+            onDelayChanged (dragLayer, l.delayMs, false);
     }
 }
 
 void TimelineView::mouseDown (const juce::MouseEvent& e)
 {
-    if (sample == nullptr || ! handleArea.expanded (0.0f, 4.0f).contains (e.position))
+    const int i = rowAt (e.position);
+
+    if (i < 0)
         return;
 
-    const float tx = thumbX();
-    dragging = true;
+    dragLayer = i;
+    const float tx = thumbX (layers[(size_t) i]);
     grabOffset = (e.position.x >= tx && e.position.x <= tx + kThumbWidth) ? e.position.x - tx : kThumbWidth * 0.5f;
     dragTo (e.position.x);
 }
 
 void TimelineView::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragging)
+    if (dragLayer >= 0)
         dragTo (e.position.x);
 }
 
 void TimelineView::mouseUp (const juce::MouseEvent&)
 {
-    if (! dragging)
+    if (dragLayer < 0)
         return;
 
-    dragging = false;
+    const int i = dragLayer;
+    dragLayer = -1;
 
     if (onDelayChanged)
-        onDelayChanged (delayMs, true);
+        onDelayChanged (i, layers[(size_t) i].delayMs, true);
 }
 
 void TimelineView::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (sample == nullptr || ! handleArea.expanded (0.0f, 4.0f).contains (e.position))
+    const int i = rowAt (e.position);
+
+    if (i < 0)
         return;
 
-    delayMs = 0.0f;
-    repaint (waveArea.getUnion (handleArea).getSmallestIntegerContainer());
+    layers[(size_t) i].delayMs = 0.0f;
+    repaint (dirtyArea());
 
     if (onDelayChanged)
-        onDelayChanged (0.0f, true);
+        onDelayChanged (i, 0.0f, true);
 }

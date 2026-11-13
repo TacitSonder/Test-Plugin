@@ -39,6 +39,7 @@ set(SAMPLER_CORE_SOURCES
 set(SAMPLER_UI_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
+    Source/LayerPage.cpp
     Source/WaveformView.cpp
     Source/SelectionOverlay.cpp
     Source/TimelineView.cpp

@@ -1,5 +1,4 @@
 #include "PluginEditor.h"
-#include "FileMenuItem.h"
 #include "UiTheme.h"
 
 SamplerLookAndFeel::SamplerLookAndFeel()
@@ -19,6 +18,7 @@ SamplerLookAndFeel::SamplerLookAndFeel()
     setColour (juce::Slider::thumbColourId, theme::accent);
     setColour (juce::Slider::textBoxTextColourId, theme::text);
     setColour (juce::Slider::textBoxOutlineColourId, theme::outline);
+    setColour (juce::Slider::rotarySliderFillColourId, theme::accent);
     setColour (juce::TextButton::buttonColourId, theme::panel);
     setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.45f));
     setColour (juce::TextButton::textColourOffId, theme::text);
@@ -41,7 +41,7 @@ void SamplerLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
 
     g.setColour (theme::background);
     g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
-    g.setColour (theme::accent);
+    g.setColour (slider.findColour (juce::Slider::rotarySliderFillColourId));
     g.strokePath (value, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
 
     const float td = thickness * 1.5f;                                          // thumb
@@ -56,55 +56,82 @@ void SamplerLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
                       juce::Justification::centred, 1, 0.6f);
 }
 
+void SamplerLookAndFeel::drawTabButton (juce::TabBarButton& button, juce::Graphics& g, bool isMouseOver, bool)
+{
+    const auto area = button.getActiveArea().toFloat();
+    const auto colour = button.getTabBackgroundColour();
+    const bool front = button.isFrontTab();
+    const float slant = area.getHeight() * 0.45f;
+
+    juce::Path shape;                                   // a tab with slanted sides, like the reference design
+    shape.startNewSubPath (area.getX(), area.getBottom());
+    shape.lineTo (area.getX() + slant, area.getY());
+    shape.lineTo (area.getRight() - slant, area.getY());
+    shape.lineTo (area.getRight(), area.getBottom());
+    shape.closeSubPath();
+
+    g.setColour (colour.withAlpha (front ? 1.0f : isMouseOver ? 0.55f : 0.35f));
+    g.fillPath (shape);
+
+    g.setColour (front ? theme::textOn (colour) : theme::text);
+    g.setFont (juce::FontOptions (14.0f));
+    g.drawText (button.getButtonText(), area.toNearestInt(), juce::Justification::centred, false);
+}
+
+int SamplerLookAndFeel::getTabButtonBestWidth (juce::TabBarButton&, int) { return 120; }
+
+void SamplerLookAndFeel::drawTabAreaBehindFrontButton (juce::TabbedButtonBar&, juce::Graphics&, int, int) {}
+
 // -----------------------------------------------------------------------------
 SamplerEditor::SamplerEditor (SamplerProcessor& p)
     : AudioProcessorEditor (&p),
       processor (p),
-      library (p.getLibrary()),
       perfMon (p.getPerf()),
-      waveform (p.getPerf()),
-      selection (p.getPerf(), waveform),
       timeline (p.getPerf()),
-      speedControl ("SPEED", p.getLayer().speed, p.getPerf()),
-      levelControl ("LEVEL", p.getLayer().level, p.getPerf()),
-      overlay (p.getPerf(), p.getLibrary())
+      overlay (p.getPerf(), [&p]
+      {
+          size_t bytes = 0;
+          int files = 0;
+          for (int i = 0; i < layercfg::kCount; ++i)
+          {
+              bytes += p.getLibrary (i).getTotalBytes();
+              files += p.getLibrary (i).getNumLoaded();
+          }
+          return "samples: " + juce::String (files) + " loaded, " + juce::String ((double) bytes / (1024.0 * 1024.0), 1) + " MB";
+      })
 {
     setLookAndFeel (&lookAndFeel);
     setOpaque (true);
-
-    fileBox.setTextWhenNothingSelected ("Drop audio files here");
-    fileBox.setTextWhenNoChoicesAvailable ("Drop audio files here");
-    fileBox.onChange = [this] { library.setSelected (fileBox.getSelectedId() - 1); };
-    addAndMakeVisible (fileBox);
-
-    undoButton.setTooltip ("Undo (Ctrl+Z): import, clear, remove, selection and delay edits");
-    undoButton.onClick = [this] { library.undo(); };
-    addAndMakeVisible (undoButton);
-
-    redoButton.setTooltip ("Redo (Ctrl+Y)");
-    redoButton.onClick = [this] { library.redo(); };
-    addAndMakeVisible (redoButton);
     setWantsKeyboardFocus (true);
 
+    for (int i = 0; i < layercfg::kCount; ++i)
+    {
+        tabs.addTab (layercfg::kNames[i], theme::layerColour (i), -1);
+
+        pages[(size_t) i] = std::make_unique<LayerPage> (processor, i);
+        pages[(size_t) i]->onSelectedSampleChanged = [this] (int layer, std::shared_ptr<const SampleData> s) { timeline.setSample (layer, std::move (s)); };
+        pages[(size_t) i]->onStatusChanged = [this] { repaint (statusArea); };
+        addChildComponent (*pages[(size_t) i]);
+
+        timeline.setLayerStyle (i, layercfg::kNames[i], theme::layerColour (i));
+        timeline.setSample (i, processor.getLibrary (i).getSample (processor.getLibrary (i).getSelected()));
+    }
+
+    tabs.onChange = [this] (int layer) { setActiveLayer (layer); };
+    addAndMakeVisible (tabs);
+
     playButton.setComponentID ("playButton");
-    playButton.setTooltip ("Plays the selected file (MIDI note 60, middle C)");
+    playButton.setTooltip ("Plays every layer (MIDI note 60, middle C)");
     playButton.setTriggeredOnMouseDown (true);          // fire on press, not on release
     playButton.onClick = [this] { processor.triggerFromGui(); };
     addAndMakeVisible (playButton);
 
-    clearButton.onClick = [this] { library.clear(); };
-    addAndMakeVisible (clearButton);
-
-    addAndMakeVisible (waveform);
-
-    selection.onCommit = [this] (int start, int end) { library.setRegion (library.getSelected(), start, end); };
-    addAndMakeVisible (selection);                       // above the waveform, below the perf overlay
-
-    timeline.onDelayChanged = [this] (float ms, bool committed) { library.setDelay (library.getSelected(), ms, committed); };
+    timeline.onDelayChanged = [this] (int layer, float ms, bool committed)
+    {
+        auto& lib = processor.getLibrary (layer);
+        lib.setDelay (lib.getSelected(), ms, committed);
+    };
     addAndMakeVisible (timeline);
-    addAndMakeVisible (speedControl);
-    addAndMakeVisible (levelControl);
-    processor.getLayer().addChangeListener (this);
 
     scaleSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     scaleSlider.setRange (100.0, 5000.0, 1.0);
@@ -131,7 +158,7 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
         layoutOverlay();
     };
     addAndMakeVisible (perfButton);
-    addChildComponent (overlay);   // added last so it paints on top of the waveform
+    addChildComponent (overlay);   // added last so it paints on top of everything
 #endif
 
     // Read the saved size first: setResizeLimits() clamps the (still empty) editor to the
@@ -139,18 +166,29 @@ SamplerEditor::SamplerEditor (SamplerProcessor& p)
     const int savedWidth = processor.getEditorWidth(), savedHeight = processor.getEditorHeight();
 
     setResizable (true, true);
-    setResizeLimits (560, 480, 2400, 1600);
+    setResizeLimits (580, 560, 2400, 1800);
     setSize (savedWidth, savedHeight);
 
-    library.addListener (this);
-    refreshFromLibrary();
+    activeLayer = juce::jlimit (0, layercfg::kCount - 1, processor.getActiveTab());
+    tabs.setCurrentTabIndex (activeLayer, false);
+    setActiveLayer (activeLayer);
 }
 
 SamplerEditor::~SamplerEditor()
 {
-    processor.getLayer().removeChangeListener (this);
-    library.removeListener (this);
     setLookAndFeel (nullptr);
+}
+
+void SamplerEditor::setActiveLayer (int layer)
+{
+    activeLayer = juce::jlimit (0, layercfg::kCount - 1, layer);
+    processor.setActiveTab (activeLayer);
+
+    for (int i = 0; i < layercfg::kCount; ++i)
+        pages[(size_t) i]->setVisible (i == activeLayer);
+
+    timeline.setActiveLayer (activeLayer);
+    repaint (statusArea);
 }
 
 // ---- layout -----------------------------------------------------------------
@@ -163,48 +201,38 @@ void SamplerEditor::resized()
     const int w = getWidth(), h = getHeight();
     const int pad     = juce::jlimit (8, 18, juce::jmin (w, h) / 30);
     const int gap     = juce::jmax (4, pad / 2);
-    const int barH    = juce::jlimit (26, 40, h / 11);
-    const int statusH = juce::jlimit (18, 26, h / 16);
+    const int tabH    = juce::jlimit (28, 38, h / 20);
+    const int statusH = juce::jlimit (18, 26, h / 28);
     const int buttonW = juce::jlimit (56, 90, w / 9);
 
     auto r = getLocalBounds().reduced (pad);
 
-    auto bar = r.removeFromTop (barH);
+    auto top = r.removeFromTop (tabH);
 #if SAMPLER_PERF_ENABLED
-    perfButton.setBounds (bar.removeFromRight (buttonW));
-    bar.removeFromRight (gap);
+    perfButton.setBounds (top.removeFromRight (buttonW));
+    top.removeFromRight (gap);
 #endif
-    clearButton.setBounds (bar.removeFromRight (buttonW));
-    bar.removeFromRight (gap);
-    playButton.setBounds (bar.removeFromRight (buttonW));
-    bar.removeFromRight (gap);
-    redoButton.setBounds (bar.removeFromRight (buttonW * 4 / 5));
-    bar.removeFromRight (gap);
-    undoButton.setBounds (bar.removeFromRight (buttonW * 4 / 5));
-    bar.removeFromRight (gap);
-    fileBox.setBounds (bar);
+    playButton.setBounds (top.removeFromRight (buttonW));
+    top.removeFromRight (gap);
+    tabs.setBounds (top);
 
     r.removeFromTop (gap);
     statusArea = r.removeFromBottom (statusH);
     r.removeFromBottom (gap / 2);
     contentArea = r;
 
-    // bottom: SCALE row, above it the timeline; the rest is the waveform editor
-    auto scaleRow = r.removeFromBottom (juce::jlimit (22, 30, h / 20));
+    // bottom: SCALE row, above it the shared timeline; the rest is the active layer's page
+    auto scaleRow = r.removeFromBottom (juce::jlimit (22, 30, h / 26));
     scaleLabelArea = scaleRow.removeFromLeft (juce::jlimit (46, 64, w / 12));
     scaleSlider.setBounds (scaleRow.removeFromLeft (juce::jmin (scaleRow.getWidth(), 420)));
     r.removeFromBottom (gap / 2);
-    timeline.setBounds (r.removeFromBottom ((int) ((float) r.getHeight() * 0.56f)));
+
+    const int timelineH = juce::jmax (TimelineView::getMinimumHeight(), juce::jmin ((int) ((float) r.getHeight() * 0.46f), r.getHeight() - 210));
+    timeline.setBounds (r.removeFromBottom (timelineH));
     r.removeFromBottom (gap);
 
-    // SPEED and LEVEL sit beside the waveform, like one row of a layer
-    auto controls = r.removeFromRight (juce::jlimit (240, 340, w * 2 / 5));
-    r.removeFromRight (gap);
-    speedControl.setBounds (controls.removeFromLeft (controls.getWidth() / 2));
-    levelControl.setBounds (controls);
-
-    waveform.setBounds (r);
-    selection.setBounds (r);
+    for (auto& page : pages)
+        page->setBounds (r);
 
     layoutOverlay();
 }
@@ -235,17 +263,19 @@ void SamplerEditor::paint (juce::Graphics& g)
     if (area.getWidth() > 640)
     {
         g.setColour (theme::subtle);
-        g.drawText ("Any MIDI note plays the selected file", area.removeFromRight (260),
+        g.drawText ("Any MIDI note plays every layer", area.removeFromRight (260),
                     juce::Justification::centredRight, true);
     }
 
-    g.setColour (statusIsWarning ? theme::warning : theme::subtle);
-    g.drawText (statusText, area, juce::Justification::centredLeft, true);
+    g.setColour (activePage().isStatusWarning() ? theme::warning : theme::subtle);
+    g.drawText (juce::String (layercfg::kNames[activeLayer]) + ":  " + activePage().getStatusText(), area,
+                juce::Justification::centredLeft, true);
 }
 
 bool SamplerEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto cmd = juce::ModifierKeys::commandModifier, shift = juce::ModifierKeys::shiftModifier;
+    auto& library = activePage().getLibrary();
 
     if (key == juce::KeyPress ('z', cmd, 0))          { library.undo(); return true; }
     if (key == juce::KeyPress ('y', cmd, 0)
@@ -254,78 +284,7 @@ bool SamplerEditor::keyPressed (const juce::KeyPress& key)
     return false;
 }
 
-void SamplerEditor::changeListenerCallback (juce::ChangeBroadcaster*)
-{
-    speedControl.refresh();
-    levelControl.refresh();
-}
-
-// ---- library -> UI ----------------------------------------------------------
-void SamplerEditor::sampleLibraryChanged()
-{
-    refreshFromLibrary();
-}
-
-void SamplerEditor::refreshFromLibrary()
-{
-    const int n = library.getNumLoaded();
-    const int sel = library.getSelected();
-
-    // Rebuild the dropdown only when the list of names changed (not on every region edit).
-    juce::StringArray names;
-    for (int i = 0; i < n; ++i)
-        names.add (library.getSample (i)->name);
-
-    if (names != menuNames)
-    {
-        perf::ScopedTimer timer (perfMon, perf::Id::MenuBuild);
-        menuNames = names;
-
-        fileBox.clear (juce::dontSendNotification);
-
-        for (int i = 0; i < n; ++i)
-        {
-            const auto title = juce::String (i + 1) + ":  " + names[i];
-
-            // The row's "x" asks us to remove file i. It runs after the menu has closed.
-            auto remove = [safe = juce::Component::SafePointer<SamplerEditor> (this), i]
-            {
-                juce::MessageManager::callAsync ([safe, i]
-                {
-                    if (safe != nullptr)
-                        safe->library.removeSample (i);
-                });
-            };
-
-            fileBox.getRootMenu()->addCustomItem (i + 1, std::make_unique<FileMenuItem> (title, std::move (remove)),
-                                                  nullptr, title);
-        }
-    }
-
-    if (n > 0)
-        fileBox.setSelectedId (sel + 1, juce::dontSendNotification);
-
-    fileBox.setEnabled (n > 0);
-    clearButton.setEnabled (n > 0 || library.getNumPending() > 0);
-    undoButton.setEnabled (library.canUndo());
-    redoButton.setEnabled (library.canRedo());
-    waveform.setSample (library.getSample (sel));
-    selection.setSample (library.getSample (sel));
-    timeline.setSample (library.getSample (sel));
-
-    statusText = juce::String (n) + " / " + juce::String (SampleLibrary::kMaxSamples) + " files loaded";
-
-    if (library.getNumPending() > 0)
-        statusText << "   |   loading " << library.getNumPending() << "...";
-
-    statusIsWarning = library.getStatusMessage().isNotEmpty();
-    if (statusIsWarning)
-        statusText << "   |   " << library.getStatusMessage();
-
-    repaint (statusArea);
-}
-
-// ---- drag and drop ----------------------------------------------------------
+// ---- drag and drop (goes to the layer whose tab is showing) ----------------------
 bool SamplerEditor::isInterestedInFileDrag (const juce::StringArray& files)
 {
     if (files == lastDragFiles)
@@ -335,7 +294,7 @@ bool SamplerEditor::isInterestedInFileDrag (const juce::StringArray& files)
     lastDragResult = false;
 
     for (const auto& f : files)
-        if (library.isSupportedFile (juce::File (f)))
+        if (activePage().getLibrary().isSupportedFile (juce::File (f)))
         {
             lastDragResult = true;
             break;
@@ -346,18 +305,18 @@ bool SamplerEditor::isInterestedInFileDrag (const juce::StringArray& files)
 
 void SamplerEditor::fileDragEnter (const juce::StringArray&, int, int)
 {
-    waveform.setDropHighlight (true);
+    activePage().setDropHighlight (true);
 }
 
 void SamplerEditor::fileDragExit (const juce::StringArray&)
 {
-    waveform.setDropHighlight (false);
+    activePage().setDropHighlight (false);
     lastDragFiles.clear();
 }
 
 void SamplerEditor::filesDropped (const juce::StringArray& files, int, int)
 {
-    waveform.setDropHighlight (false);
+    activePage().setDropHighlight (false);
     lastDragFiles.clear();
-    library.addFiles (files);
+    activePage().getLibrary().addFiles (files);
 }

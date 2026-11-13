@@ -715,6 +715,54 @@ int main()
         CHECK (finite && eng.getNumActiveVoices() == 0, "wobbling speed envelope: finite output, voice ends");
     }
 
+    std::printf ("[layers] two layers play together, independently\n");
+    {
+        SamplerProcessor p;
+        CHECK (layercfg::kCount >= 2, "at least two layers");
+        p.getLibrary (0).addFiles ({ p3 });
+        p.getLibrary (1).addFiles ({ p3 });
+        CHECK (pumpUntil ([&] { return p.getLibrary (0).getNumLoaded() == 1 && p.getLibrary (1).getNumLoaded() == 1; }), "each layer loads its own files");
+        CHECK (p.getLibrary (0).getSample (0) != p.getLibrary (1).getSample (0), "banks are separate");
+
+        p.getLayer (1).level.setKnob (-6.0206f);                      // layer 1 is 6 dB quieter
+        p.setPlayConfigDetails (0, 2, 48000.0, 512);
+        p.prepareToPlay (48000.0, 512);
+
+        juce::AudioBuffer<float> buf (2, 512); juce::MidiBuffer none;
+        p.triggerFromGui();
+        p.processBlock (buf, none);
+        const float g = (float) SamplerEngine::kGuiVelocity / 127.0f;
+        double err = 0; for (int i = 0; i < 512; ++i) err = juce::jmax (err, (double) std::abs (buf.getSample (0, i) - 1.5f * g * genL (i)));
+        CHECK (err < 1e-4, "output = layer 0 + layer 1 (at -6 dB), summed");
+
+        p.getLibrary (1).clear();                                     // layer 1 empty: only layer 0 is heard
+        p.prepareToPlay (48000.0, 512);
+        p.triggerFromGui();
+        p.processBlock (buf, none);
+        err = 0; for (int i = 0; i < 512; ++i) err = juce::jmax (err, (double) std::abs (buf.getSample (0, i) - g * genL (i)));
+        CHECK (err < 1e-5, "an empty layer adds nothing");
+
+        p.getLibrary (0).clear();
+        CHECK (p.getLibrary (0).canUndo() && ! p.getLibrary (1).canRedo(), "undo history is per layer");
+        p.getLibrary (1).undo();
+        CHECK (p.getLibrary (1).getNumLoaded() == 1 && p.getLibrary (0).getNumLoaded() == 0, "undo in layer 1 does not touch layer 0");
+
+        // state: both layers, their parameters and the active tab
+        p.getLibrary (1).setRegion (0, 1000, 3000);
+        p.getLibrary (1).setDelay (0, 120.0f, true);
+        p.getLayer (1).speed.setKnob (2.0f);
+        p.setActiveTab (1);
+        juce::MemoryBlock state; p.getStateInformation (state);
+
+        SamplerProcessor q;
+        q.setStateInformation (state.getData(), (int) state.getSize());
+        CHECK (pumpUntil ([&] { return q.getLibrary (1).getNumLoaded() == 1; }), "layer 1 files restored");
+        int s, e; q.getLibrary (1).getSample (0)->getRegion (s, e);
+        CHECK (s == 1000 && e == 3000 && q.getLibrary (1).getSample (0)->delayMs.load() == 120.0f, "layer 1 region and delay restored");
+        CHECK (std::abs (q.getLayer (1).speed.getKnob() - 2.0f) < 1e-6f && std::abs (q.getLayer (0).speed.getKnob() - 1.0f) < 1e-6f, "each layer keeps its own speed");
+        CHECK (q.getActiveTab() == 1 && q.getLibrary (0).getNumLoaded() == 0, "active tab restored; layer 0 stays empty");
+    }
+
     std::printf ("[processor] state round trip (files, region, selection, window size)\n");
     {
         juce::MemoryBlock state;
