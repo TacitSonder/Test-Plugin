@@ -91,14 +91,14 @@ void EnvelopeEditor::paint (juce::Graphics& g)
         const juce::Graphics::ScopedSaveState state (g);                       // points and lines stay inside the frame
         g.reduceClipRegion (area.expanded (kPointRadius + 1.0f).getSmallestIntegerContainer());
 
-        g.setColour (theme::accent);
+        g.setColour (accent);
         for (int i = 0; i + 1 < env.count; ++i)
             g.drawLine (juce::Line<float> (toPixel (env.pts[(size_t) i]), toPixel (env.pts[(size_t) i + 1])), 1.6f);
 
         for (int i = 0; i < env.count; ++i)
         {
             const auto c = toPixel (env.pts[(size_t) i]);
-            g.setColour (i == dragIndex ? juce::Colours::white : theme::accent);
+            g.setColour (i == dragIndex ? juce::Colours::white : accent);
             g.fillEllipse (c.x - kPointRadius, c.y - kPointRadius, kPointRadius * 2.0f, kPointRadius * 2.0f);
         }
     }

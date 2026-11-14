@@ -65,12 +65,12 @@ void SelectionOverlay::paint (juce::Graphics& g)
         g.fillRect (area.getX(), area.getY(), cs - area.getX(), area.getHeight());
         g.fillRect (ce, area.getY(), area.getRight() - ce, area.getHeight());
 
-        g.setColour (theme::accent.withAlpha (0.10f));                            // tint what will play
+        g.setColour (accent.withAlpha (0.10f));                            // tint what will play
         g.fillRect (cs, area.getY(), ce - cs, area.getHeight());
     }
 
     // edges (only when inside the visible part) with a small grip on top
-    g.setColour (full ? theme::subtle.withAlpha (0.55f) : theme::accent);
+    g.setColour (full ? theme::subtle.withAlpha (0.55f) : accent);
     for (const float x : { xs, xe })
     {
         if (x < area.getX() - 0.5f || x > area.getRight() + 0.5f)
@@ -89,7 +89,7 @@ void SelectionOverlay::paint (juce::Graphics& g)
         const float x1 = area.getX() + area.getWidth() * (float) (waveform.getViewStart() + waveform.getViewLength()) / n;
         g.setColour (theme::subtle.withAlpha (0.25f));
         g.fillRect (area.getX(), area.getBottom() - 4.0f, area.getWidth(), 3.0f);
-        g.setColour (theme::accent.withAlpha (0.8f));
+        g.setColour (accent.withAlpha (0.8f));
         g.fillRect (x0, area.getBottom() - 4.0f, juce::jmax (3.0f, x1 - x0), 3.0f);
     }
 
@@ -113,7 +113,7 @@ void SelectionOverlay::paint (juce::Graphics& g)
         if (text.isNotEmpty() && juce::GlyphArrangement::getStringWidthInt (font, text) <= available)
         {
             g.setFont (font);
-            g.setColour (full ? theme::subtle.withAlpha (0.7f) : theme::accent);
+            g.setColour (full ? theme::subtle.withAlpha (0.7f) : accent);
             g.drawText (text, juce::Rectangle<float> (area.getX(), area.getY() - 20.0f, area.getWidth(), 18.0f),
                         juce::Justification::centredRight, false);
             break;

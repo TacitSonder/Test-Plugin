@@ -53,13 +53,12 @@ void ModParam::setEnvelope (const mod::Envelope& e)
     table.publish();
 }
 
-void LayerParams::saveTo (juce::XmlElement& parent) const
+void LayerParams::saveTo (juce::XmlElement& layer) const
 {
-    auto* layer = parent.createNewChildElement ("Layer");
 
-    auto put = [layer] (const char* tag, const ModParam& p)
+    auto put = [&layer] (const char* tag, const ModParam& p)
     {
-        auto* m = layer->createNewChildElement (tag);
+        auto* m = layer.createNewChildElement (tag);
         m->setAttribute ("knob", (double) p.getKnob());
         m->setAttribute ("env", p.isEnvelopeMode() ? 1 : 0);
 

@@ -4,6 +4,12 @@ A VST3 sampler instrument. Drop up to 8 audio files on the window, pick one from
 dropdown, optionally select part of it, and any MIDI note (or the Play button) plays it.
 
 ## Using it
+* **Layers and tabs:** the plugin has two layers, **ONSET** and **BODY**, each on its own tab. A layer is a
+  complete sampler: its own bank of up to 8 files, dropdown, undo history, selection, SPEED and LEVEL. Every
+  MIDI note and the Play button trigger **all layers at once** and their sounds are summed. Dropped files go
+  to the layer whose tab is showing. The timeline (and SCALE) below the tabs is shared and never moves: it
+  draws every layer in its colour, with one delay handle per layer. The active tab is saved with the project.
+  Adding a layer is a one-line change in `Source/LayerConfig.h` plus a colour in `UiTheme.h`.
 * **Drop files** anywhere on the window (several at once is fine). Formats: WAV, AIFF, FLAC,
   OGG, MP3 (Windows also reads other Windows Media formats).
 * **Dropdown** lists the loaded files; selecting one switches the waveform and the file that plays.

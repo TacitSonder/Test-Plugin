@@ -36,7 +36,8 @@ public:
 
     void prepare (double sampleRate) noexcept;
     void reset() noexcept;
-    void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi) noexcept;
+    // clearBuffer = false adds this layer's sound to what is already in the buffer (layers are summed).
+    void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, bool clearBuffer = true) noexcept;
 
     // Any thread, lock-free. The note starts at the beginning of the next audio block.
     void requestTrigger() noexcept

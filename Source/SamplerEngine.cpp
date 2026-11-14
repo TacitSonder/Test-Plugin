@@ -249,12 +249,14 @@ void SamplerEngine::renderSegment (float* left, float* right, int numSamples, in
             renderVoice (v, left, right, numSamples);
 }
 
-void SamplerEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi) noexcept
+void SamplerEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, bool clearBuffer) noexcept
 {
     library.beginAudioBlock();        // must be first: lets the library know a new block started
 
     const int numSamples = buffer.getNumSamples();
-    buffer.clear();
+
+    if (clearBuffer)
+        buffer.clear();
 
     if (buffer.getNumChannels() < 2 || numSamples <= 0)
         return;

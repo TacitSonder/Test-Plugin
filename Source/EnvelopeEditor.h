@@ -23,6 +23,7 @@ public:
     std::function<juce::String (float normalised)> yLabel;          // axis / read-out text for a height 0..1
 
     void setEnvelope (const mod::Envelope&);          // from the model; does not call onChanged
+    void setAccent (juce::Colour c)       { accent = c; repaint(); }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -44,6 +45,7 @@ private:
     mod::Envelope env = mod::Envelope::flat (0.5f);
     juce::Rectangle<float> area;
     int dragIndex = -1;
+    juce::Colour accent { 0xff4fc3f7 };
     float vx0 = 0.0f, vx1 = 1.0f, vy0 = 0.0f, vy1 = 1.0f;          // visible part of the envelope
     std::optional<mod::Envelope> beforeReset;                       // for "Undo reset"
 

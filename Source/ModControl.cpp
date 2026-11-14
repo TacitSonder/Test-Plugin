@@ -18,7 +18,7 @@ void ModeSwitch::paint (juce::Graphics& g)
     g.drawRoundedRectangle (pill.reduced (0.5f), 8.0f, 1.0f);
 
     const float d = pill.getHeight() - 4.0f;                                    // thumb: left = ENV, right = KNOB
-    g.setColour (theme::accent);
+    g.setColour (accent);
     g.fillEllipse (envelopeMode ? pill.getX() + 2.0f : pill.getRight() - 2.0f - d, pill.getY() + 2.0f, d, d);
 }
 
@@ -79,6 +79,14 @@ void ModControl::refresh()
     editor.setEnvelope (param.getEnvelope());
     modeSwitch.setEnvelopeMode (param.isEnvelopeMode());
     applyMode (param.isEnvelopeMode());
+}
+
+void ModControl::setAccent (juce::Colour c)
+{
+    knob.setColour (juce::Slider::rotarySliderFillColourId, c);
+    editor.setAccent (c);
+    modeSwitch.setAccent (c);
+    knob.repaint();
 }
 
 void ModControl::applyMode (bool envelopeMode)

@@ -92,12 +92,12 @@ void WaveformView::paint (juce::Graphics& g)
     const auto bounds = getLocalBounds().toFloat();
     g.setColour (theme::panel);
     g.fillRoundedRectangle (bounds.reduced (1.0f), 6.0f);
-    g.setColour (dropHighlight ? theme::accent : theme::outline);
+    g.setColour (dropHighlight ? accent : theme::outline);
     g.drawRoundedRectangle (bounds.reduced (dropHighlight ? 1.5f : 0.5f), 6.0f, dropHighlight ? 2.5f : 1.0f);
 
     if (sample == nullptr)
     {
-        g.setColour (dropHighlight ? theme::accent : theme::subtle);
+        g.setColour (dropHighlight ? accent : theme::subtle);
         g.setFont (juce::FontOptions (juce::jlimit (14.0f, 26.0f, (float) getHeight() / 12.0f)));
         g.drawFittedText ("Drop up to 8 audio files here", getLocalBounds().reduced (20),
                           juce::Justification::centred, 2);
@@ -113,6 +113,6 @@ void WaveformView::paint (juce::Graphics& g)
     g.setColour (theme::outline);
     g.drawHorizontalLine ((int) waveArea.getCentreY(), waveArea.getX(), waveArea.getRight());
 
-    g.setColour (theme::accent);
+    g.setColour (accent);
     g.fillPath (path);
 }

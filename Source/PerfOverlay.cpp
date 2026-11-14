@@ -7,7 +7,7 @@ namespace
     constexpr int kPadding = 8;
 }
 
-PerfOverlay::PerfOverlay (perf::Monitor& m, SampleLibrary& lib) : monitor (m), library (lib)
+PerfOverlay::PerfOverlay (perf::Monitor& m, std::function<juce::String()> info) : monitor (m), extraInfo (std::move (info))
 {
     setInterceptsMouseClicks (false, false);
     setVisible (false);
@@ -40,9 +40,7 @@ void PerfOverlay::timerCallback()
 {
     lines = monitor.buildReport();
 
-    const double mb = (double) library.getTotalBytes() / (1024.0 * 1024.0);
-    lines.add ("samples: " + juce::String (library.getNumLoaded()) + " loaded, "
-               + juce::String (mb, 1) + " MB");
+    lines.add (extraInfo ? extraInfo() : juce::String());
 
     repaint();
 }

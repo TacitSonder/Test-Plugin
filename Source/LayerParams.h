@@ -65,6 +65,6 @@ public:
 
     ModParam speed, level;
 
-    void saveTo (juce::XmlElement& parent) const;       // adds a <Layer> child
-    void loadFrom (const juce::XmlElement& layer);      // message thread; notifies listeners
+    void saveTo (juce::XmlElement& layerElement) const;     // adds <Speed> and <Level> children
+    void loadFrom (const juce::XmlElement& layerElement);   // message thread; notifies listeners
 };

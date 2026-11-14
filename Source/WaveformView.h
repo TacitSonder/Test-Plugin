@@ -21,6 +21,7 @@ public:
 
     void setSample (std::shared_ptr<const SampleData> newSample);
     void setDropHighlight (bool shouldHighlight);
+    void setAccent (juce::Colour c)       { accent = c; repaint(); }
 
     // Where the waveform is drawn, in this component's coordinates.
     juce::Rectangle<float> getWaveArea() const noexcept { return waveArea; }
@@ -50,6 +51,7 @@ private:
     double viewStart = 0.0, viewLen = 0.0;
     std::vector<float> columnTop, columnBottom;   // scratch, reused between rebuilds
     bool dropHighlight = false;
+    juce::Colour accent { 0xff4fc3f7 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveformView)
 };

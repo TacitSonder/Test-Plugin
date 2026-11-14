@@ -14,6 +14,7 @@ public:
     std::function<void (bool envelopeMode)> onChange;
 
     void setEnvelopeMode (bool b)         { if (b != envelopeMode) { envelopeMode = b; repaint(); } }
+    void setAccent (juce::Colour c)       { accent = c; repaint(); }
     bool isEnvelopeMode() const noexcept  { return envelopeMode; }
 
     void paint (juce::Graphics&) override;
@@ -21,6 +22,7 @@ public:
 
 private:
     bool envelopeMode = false;
+    juce::Colour accent { 0xff4fc3f7 };
 };
 
 // One modulatable parameter of a layer: a title, a knob that can be swapped for an envelope
@@ -31,6 +33,7 @@ public:
     ModControl (const juce::String& title, ModParam&, perf::Monitor&);
 
     void refresh();                                   // re-read everything from the ModParam
+    void setAccent (juce::Colour c);                  // the layer's colour: knob arc, envelope, switch
 
     void paint (juce::Graphics&) override;
     void resized() override;
